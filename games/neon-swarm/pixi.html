@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#070414">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Neon Swarm</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #070414;
+    overscroll-behavior: none; touch-action: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+  }
+  body { position: fixed; inset: 0; }
+  canvas { display: block; position: absolute; inset: 0; touch-action: none; outline: none; }
+  #safe {
+    position: fixed; inset: 0; visibility: hidden; pointer-events: none;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+             env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  }
+  #fatal {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    padding: 24px; color: #ffd6ec; font: 16px/1.5 system-ui, sans-serif; text-align: center;
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@8.22.0/dist/pixi.min.js"></script>
+</head>
+<body>
+<div id="safe"></div>
+<div id="fatal"></div>
+<script>
+(async function neonSwarm() {
+'use strict';
+
+/* ============================================================
+   NEON SWARM — PixiJS 8.22.0 (WebGL renderer)
+   ============================================================ */
+
+function fatal(msg) {
+  const el = document.getElementById('fatal');
+  el.textContent = msg; el.style.display = 'flex';
+}
+if (!window.PIXI || !PIXI.Application) {
+  fatal('PixiJS 8.22.0 could not be loaded from cdn.jsdelivr.net. Check the connection and reload.');
+  return;
+}
+
+// ---------- block browser gestures (scroll, zoom, long-press menu)
+const stop = (e) => e.preventDefault();
+document.addEventListener('touchmove', stop, { passive: false });
+document.addEventListener('gesturestart', stop);
+document.addEventListener('dblclick', stop);
+document.addEventListener('contextmenu', stop);
+document.addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+
+// ---------- constants
+const FONT = '"Avenir Next", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+const COL = {
+  bg: 0x070414, grid: 0x2a1a5c, gridMajor: 0x3d2580,
+  player: 0x52f5ff, orb: 0xb8ff3c, wave: 0xc8ff5a, pink: 0xff2e88, dim: 0x3a3366,
+};
+const rgb2bgr = (c) => ((c & 0xff) << 16) | (c & 0xff00) | ((c >> 16) & 0xff);
+// Particle.color layout used by the v8 particle shader: ABGR (alpha in the top byte)
+const pc = (bgr, a) => bgr + (((a <= 0 ? 0 : a >= 1 ? 1 : a) * 255 | 0) << 24);
+
+const TYPES = [
+  { color: 0xff2e88, speed: 165, steer: 2.0, r: 13, face: true },   // dart (triangle)
+  { color: 0xffb020, speed: 132, steer: 2.7, r: 12, face: true },   // blade (diamond)
+  { color: 0xa45cff, speed: 100, steer: 3.2, r: 15, spin: 1.1 },    // block (square)
+  { color: 0xff5a2e, speed: 118, steer: 2.4, r: 14, spin: 1.4 },    // hive (hexagon)
+];
+TYPES.forEach((t) => { t.bgr = rgb2bgr(t.color); });
+const BGR_WHITE = 0xffffff, BGR_PLAYER = rgb2bgr(COL.player), BGR_ORB = rgb2bgr(COL.orb);
+
+const ROUND_TIME_PER_LEVEL = 15;   // seconds
+const CHAIN_R = 44;                // chain-reaction blast radius (+ enemy radius)
+const MAX_DEBRIS_PLAY = 7000;
+const ALL_DYNAMIC = { position: true, rotation: true, vertex: true, uvs: true, color: true };
+
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const rand = (a, b) => a + Math.random() * (b - a);
+const fmt = (n) => Math.floor(n).toLocaleString('en-US');
+
+// ---------- storage (Best) — never allowed to break the game
+const BEST_KEY = 'neonSwarm.best.v1';
+function loadBest() { try { return Number(localStorage.getItem(BEST_KEY)) || 0; } catch (e) { return 0; } }
+function saveBest(v) { try { localStorage.setItem(BEST_KEY, String(Math.floor(v))); } catch (e) { /* ignore */ } }
+
+/* ============================================================
+   AUDIO — Web Audio API, everything synthesized
+   ============================================================ */
+const sfx = (() => {
+  let ctx = null, out = null, noiseBuf = null, lastBoom = 0, lastClose = 0;
+  // minor pentatonic steps: each chain kill climbs one note
+  const STEPS = [0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24, 27, 29, 31, 34, 36];
+  function init() {
+    try {
+      if (!ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        ctx = new AC();
+        const comp = ctx.createDynamicsCompressor();
+        comp.threshold.value = -16; comp.knee.value = 10; comp.ratio.value = 6;
+        comp.attack.value = 0.003; comp.release.value = 0.2;
+        out = ctx.createGain(); out.gain.value = 0.5;
+        out.connect(comp); comp.connect(ctx.destination);
+        noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+        const d = noiseBuf.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      }
+      if (ctx.state !== 'running') ctx.resume();
+    } catch (e) { ctx = null; }
+  }
+  const ok = () => ctx && ctx.state === 'running';
+  function env(g, t, peak, dur, a = 0.005) {
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + a);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  }
+  function tone(type, f0, f1, dur, peak, delay = 0) {
+    const t = ctx.currentTime + delay;
+    const o = ctx.createOscillator(); o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = ctx.createGain(); env(g, t, peak, dur);
+    o.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.03);
+  }
+  function noise(dur, peak, type, f0, f1, q = 1) {
+    const t = ctx.currentTime;
+    const s = ctx.createBufferSource(); s.buffer = noiseBuf;
+    const f = ctx.createBiquadFilter(); f.type = type; f.Q.value = q;
+    f.frequency.setValueAtTime(f0, t);
+    if (f1) f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = ctx.createGain(); env(g, t, peak, dur, 0.003);
+    s.connect(f); f.connect(g); g.connect(out);
+    s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.03);
+  }
+  return {
+    init,
+    boom(combo) {                       // pitch rises with combo
+      if (!ok()) return;
+      const now = ctx.currentTime;
+      if (now - lastBoom < 0.035) return;
+      lastBoom = now;
+      const step = STEPS[clamp(combo - 1, 0, STEPS.length - 1)];
+      const f = 120 * Math.pow(2, step / 12);
+      tone('triangle', f * 2, f, 0.22, 0.2);
+      tone('sine', f, f * 0.5, 0.28, 0.16);
+      noise(0.17, 0.22, 'bandpass', f * 7, f * 2, 0.9);
+    },
+    pickup(n) {
+      if (!ok()) return;
+      const f = 523 * Math.pow(2, STEPS[clamp(n, 0, 15)] / 12);
+      tone('sine', f, f * 1.5, 0.11, 0.14);
+    },
+    wave() {
+      if (!ok()) return;
+      tone('sine', 150, 36, 0.65, 0.5);
+      tone('sawtooth', 75, 34, 0.4, 0.07);
+      noise(0.5, 0.32, 'lowpass', 2600, 180, 0.7);
+    },
+    close() {
+      if (!ok()) return;
+      const now = ctx.currentTime;
+      if (now - lastClose < 0.09) return;
+      lastClose = now;
+      noise(0.15, 0.16, 'highpass', 1600, 5200, 0.7);
+      tone('sine', 1320, 1760, 0.09, 0.06);
+    },
+    death() {
+      if (!ok()) return;
+      tone('sawtooth', 320, 38, 1.0, 0.22);
+      tone('sine', 95, 28, 1.1, 0.5);
+      noise(0.9, 0.38, 'lowpass', 3200, 110, 0.8);
+    },
+    start() { if (ok()) tone('sine', 440, 880, 0.12, 0.12); },
+    level() { if (!ok()) return; tone('square', 220, 220, 0.07, 0.04); tone('square', 330, 330, 0.08, 0.04, 0.09); },
+  };
+})();
+
+/* ============================================================
+   RENDERER
+   ============================================================ */
+const app = new PIXI.Application();
+try {
+  await app.init({
+    resizeTo: window,
+    background: COL.bg,
+    antialias: true,
+    resolution: Math.min(window.devicePixelRatio || 1, 2),
+    autoDensity: true,
+    preference: 'webgl',            // custom bloom shader is written in GLSL
+    powerPreference: 'high-performance',
+  });
+} catch (e) {
+  fatal('This device could not start WebGL, which Neon Swarm needs.');
+  return;
+}
+document.body.appendChild(app.canvas);
+const W = () => app.screen.width;
+const H = () => app.screen.height;
+
+/* ---------- procedural texture atlas (one canvas, one GPU texture) ---------- */
+const TEX = (() => {
+  const cv = document.createElement('canvas');
+  cv.width = 1024; cv.height = 128;
+  const g = cv.getContext('2d');
+  const rects = {};
+  let x = 0;
+  const put = (name, w, h, draw) => {
+    g.save(); g.translate(x + w / 2, h / 2); draw(w, h); g.restore();
+    rects[name] = [x, 0, w, h]; x += w + 6;
+  };
+  const path = (pts) => {
+    g.beginPath(); pts.forEach(([px, py], i) => (i ? g.lineTo(px, py) : g.moveTo(px, py))); g.closePath();
+  };
+  const ngon = (n, R, rot) => Array.from({ length: n }, (_, i) => {
+    const a = rot + (i * Math.PI * 2) / n; return [Math.cos(a) * R, Math.sin(a) * R];
+  });
+  const scaled = (pts, k) => pts.map(([a, b]) => [a * k, b * k]);
+  const shape = (pts) => () => {
+    g.lineJoin = 'round';
+    g.shadowColor = '#ffffff'; g.shadowBlur = 14;
+    path(pts); g.fillStyle = 'rgba(255,255,255,0.16)'; g.fill();
+    g.strokeStyle = '#ffffff'; g.lineWidth = 5; g.stroke(); g.stroke();
+    g.shadowBlur = 4; g.globalAlpha = 0.7; g.lineWidth = 2.5;
+    path(scaled(pts, 0.42)); g.stroke();
+    g.globalAlpha = 1;
+  };
+  put('e0', 128, 128, shape(ngon(3, 42, 0)));                                       // dart
+  put('e1', 128, 128, shape([[46, 0], [0, 25], [-40, 0], [0, -25]]));               // blade
+  put('e2', 128, 128, shape(ngon(4, 40, Math.PI / 4)));                             // block
+  put('e3', 128, 128, shape(ngon(6, 40, 0)));                                       // hive
+  put('glow', 128, 128, () => {
+    const gr = g.createRadialGradient(0, 0, 0, 0, 0, 63);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.12, 'rgba(255,255,255,0.7)');
+    gr.addColorStop(0.38, 'rgba(255,255,255,0.2)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(-64, -64, 128, 128);
+  });
+  put('spark', 32, 32, () => {
+    const gr = g.createRadialGradient(0, 0, 0, 0, 0, 15);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.85)');
+    gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(-16, -16, 32, 32);
+  });
+  put('shard', 44, 16, () => {
+    g.shadowColor = '#fff'; g.shadowBlur = 4; g.fillStyle = '#fff';
+    path([[19, 0], [-2, 4.5], [-19, 0], [-2, -4.5]]); g.fill();
+  });
+  put('orb', 64, 64, () => {
+    g.shadowColor = '#fff'; g.shadowBlur = 8;
+    g.strokeStyle = '#fff'; g.lineWidth = 3;
+    g.beginPath(); g.arc(0, 0, 19, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(0, 0, 7, 0, Math.PI * 2); g.fill();
+  });
+  let source;
+  try { source = new PIXI.CanvasSource({ resource: cv, autoGenerateMipmaps: true }); }
+  catch (e) { source = PIXI.Texture.from(cv).source; }
+  const out = {};
+  for (const k in rects) out[k] = new PIXI.Texture({ source, frame: new PIXI.Rectangle(...rects[k]) });
+  out.enemy = [out.e0, out.e1, out.e2, out.e3];
+  return out;
+})();
+
+/* ---------- custom bloom: bright-pass → Gaussian blur → additive combine ----------
+   PixiJS v8 core has BlurFilter but no bloom (bloom lives in the separate pixi-filters
+   package, which this build must not use). So bloom is a hand-written multi-pass Filter. */
+const FILTER_VERT = `in vec2 aPosition;
+out vec2 vTextureCoord;
+uniform vec4 uInputSize;
+uniform vec4 uOutputFrame;
+uniform vec4 uOutputTexture;
+vec4 filterVertexPosition(void){
+  vec2 position = aPosition * uOutputFrame.zw + uOutputFrame.xy;
+  position.x = position.x * (2.0 / uOutputTexture.x) - 1.0;
+  position.y = position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) - uOutputTexture.z;
+  return vec4(position, 0.0, 1.0);
+}
+vec2 filterTextureCoord(void){ return aPosition * (uOutputFrame.zw * uInputSize.zw); }
+void main(void){ gl_Position = filterVertexPosition(); vTextureCoord = filterTextureCoord(); }`;
+// same vertex stage, plus a 0..1 screen coordinate for the vignette
+const COMBINE_VERT = FILTER_VERT.replace('out vec2 vTextureCoord;', 'out vec2 vTextureCoord;\nout vec2 vScreen;')
+  .replace('vTextureCoord = filterTextureCoord(); }', 'vTextureCoord = filterTextureCoord(); vScreen = aPosition; }');
+
+const EXTRACT_FRAG = `in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+uniform float uThreshold;
+void main(void){
+  vec4 c = texture(uTexture, vTextureCoord);
+  float l = max(c.r, max(c.g, c.b));
+  finalColor = c * smoothstep(uThreshold, uThreshold + 0.3, l);
+}`;
+
+const COMBINE_FRAG = `in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+in vec2 vScreen;
+uniform sampler2D uBloomTexture;
+uniform float uBloomScale;
+uniform float uVignette;
+void main(void){
+  vec4 c = texture(uTexture, vTextureCoord);
+  vec3 b = texture(uBloomTexture, vTextureCoord).rgb * uBloomScale;
+  float v = smoothstep(0.85, 0.2, distance(vScreen, vec2(0.5)) * 1.15);
+  vec3 col = (c.rgb + b) * mix(1.0 - uVignette, 1.0, v);
+  finalColor = vec4(col, 1.0);
+}`;
+
+class NeonBloom extends PIXI.Filter {
+  constructor({ threshold = 0.32, scale = 1.25, blur = 12, quality = 4, resolution = 1 } = {}) {
+    super({
+      glProgram: PIXI.GlProgram.from({ vertex: COMBINE_VERT, fragment: COMBINE_FRAG, name: 'neon-bloom-combine' }),
+      resources: {
+        bloomUniforms: {
+          uBloomScale: { value: scale, type: 'f32' },
+          uVignette: { value: 0.45, type: 'f32' },
+        },
+        uBloomTexture: PIXI.Texture.WHITE.source,
+      },
+      resolution, antialias: 'off', padding: 0,
+    });
+    this.extract = new PIXI.Filter({
+      glProgram: PIXI.GlProgram.from({ vertex: FILTER_VERT, fragment: EXTRACT_FRAG, name: 'neon-bloom-extract' }),
+      resources: { extractUniforms: { uThreshold: { value: threshold, type: 'f32' } } },
+    });
+    this.blur = new PIXI.BlurFilter({ strength: blur * resolution, quality });
+  }
+  apply(filterManager, input, output, clearMode) {
+    const bright = PIXI.TexturePool.getSameSizeTexture(input);
+    this.extract.apply(filterManager, input, bright, true);
+    const bloom = PIXI.TexturePool.getSameSizeTexture(input);
+    this.blur.apply(filterManager, bright, bloom, true);
+    this.resources.uBloomTexture = bloom.source;
+    filterManager.applyFilter(this, input, output, clearMode);
+    PIXI.TexturePool.returnTexture(bloom);
+    PIXI.TexturePool.returnTexture(bright);
+  }
+}
+
+/* ---------- scene graph ---------- */
+const world = new PIXI.Container();          // everything that glows
+const bgLayer = new PIXI.Container();
+const bgGlow = new PIXI.Sprite(TEX.glow);
+const bgGrid = new PIXI.Graphics();
+bgGlow.anchor.set(0.5); bgGlow.tint = 0x3a1470; bgGlow.alpha = 0.55; bgGlow.blendMode = 'add';
+bgLayer.addChild(bgGrid, bgGlow);
+
+const mkPC = (tex) => {
+  const c = new PIXI.ParticleContainer({ texture: tex, dynamicProperties: ALL_DYNAMIC, roundPixels: false });
+  c.blendMode = 'add';
+  return c;
+};
+const lightPC = mkPC(TEX.glow);    // explosion light washes over the grid
+const orbLayer = new PIXI.Container();
+const trailG = new PIXI.Graphics(); trailG.blendMode = 'add';
+const enemyPC = mkPC(TEX.e0);
+const fxPC = mkPC(TEX.shard);
+const waveG = new PIXI.Graphics(); waveG.blendMode = 'add';
+const playerC = new PIXI.Container();
+const popLayer = new PIXI.Container();
+const overlay = new PIXI.Container();
+world.addChild(bgLayer, lightPC, orbLayer, trailG, enemyPC, fxPC, waveG, playerC, popLayer, overlay);
+
+const bloom = new NeonBloom({ resolution: Math.min(window.devicePixelRatio || 1, 1.5) });
+world.filters = [bloom];
+world.filterArea = app.screen;               // skip per-frame bounds measuring of thousands of particles
+
+const hud = new PIXI.Container();             // crisp, no bloom
+app.stage.addChild(world, hud);
+
+// player visual
+const pHalo = new PIXI.Sprite(TEX.glow); pHalo.anchor.set(0.5); pHalo.tint = COL.player; pHalo.blendMode = 'add'; pHalo.scale.set(0.5);
+const pCore = new PIXI.Sprite(TEX.spark); pCore.anchor.set(0.5); pCore.scale.set(0.95); pCore.blendMode = 'add';
+const ringG = new PIXI.Graphics();
+playerC.addChild(pHalo, ringG, pCore);
+
+/* ---------- HUD ---------- */
+const textStyle = (size, weight = '600', extra = {}) => ({ fontFamily: FONT, fontSize: size, fontWeight: weight, fill: 0xffffff, ...extra });
+const mkBT = (size, weight, anchorX = 0, anchorY = 0) => {
+  const t = new PIXI.BitmapText({ text: '0', style: textStyle(size, weight) });
+  t.anchor.set(anchorX, anchorY);
+  return t;
+};
+const hScoreLabel = new PIXI.Text({ text: 'Score', style: textStyle(13, '500', { letterSpacing: 1 }) });
+const hScore = mkBT(30, '700');
+const hLevel = mkBT(13, '500');
+const hBestLabel = new PIXI.Text({ text: 'Best', style: textStyle(13, '500', { letterSpacing: 1 }) });
+hBestLabel.anchor.set(1, 0);
+const hBest = mkBT(30, '700', 1, 0);
+const hCombo = mkBT(26, '800', 0.5, 0.5);
+const hPerf = mkBT(13, '500', 0, 1);
+hScoreLabel.alpha = hBestLabel.alpha = 0.55; hLevel.alpha = 0.5; hPerf.alpha = 0.75;
+hCombo.tint = COL.wave; hCombo.visible = false;
+hud.addChild(hScoreLabel, hScore, hLevel, hBestLabel, hBest, hCombo, hPerf);
+
+/* ============================================================
+   STATE
+   ============================================================ */
+let state = 'title';            // title | play | over | stress | stressDone
+let best = loadBest();
+let tGame = 0, score = 0, kills = 0, combo = 0, comboTimer = 0, maxCombo = 0, comboPop = 1;
+let energy = 0, level = 0, spawnTimer = 0, overT = 0, newBest = false;
+let timeScale = 1, slowTimer = 0, shakeAmp = 0, bigChainStep = 0;
+let speedScale = 1, waveR = 220, touchOffset = 70, orbTarget = 5;
+let lastCloseText = 0;
+const BIG_CHAIN = [14, 32, 60, 100, 160];
+
+const player = { x: 0, y: 0, tx: 0, ty: 0, r: 7, alive: true, shield: 0 };
+const TRAIL_N = 24;
+const trail = Array.from({ length: TRAIL_N }, () => ({ x: 0, y: 0 }));
+
+const enemies = [];   // parallel to enemyPC.particleChildren
+const debris = [];    // parallel to fxPC.particleChildren
+const lights = [];    // parallel to lightPC.particleChildren
+const orbs = [];
+const waves = [];
+let pending = [];     // delayed chain explosions
+const popups = [];
+const particlePool = [];
+
+// stress test
+let stressT = 0, stressAcc = 0, stressMax = 0, stressPeakE = 0, stressPeakD = 0, stressAvg = 0, stressReason = '';
+
+// frame timing (real time)
+const frameTimes = new Float64Array(2048); let ftHead = 0, ftCount = 0;
+let fps = 0, avg3 = 0, perfTimer = 0, hudTimer = 0, lastNow = 0;
+const insets = { t: 0, r: 0, b: 0, l: 0 };
+let lastW = 0, lastH = 0;
+
+/* ---------- particle helpers ---------- */
+function getParticle(tex) {
+  const p = particlePool.pop() || new PIXI.Particle({ texture: tex, anchorX: 0.5, anchorY: 0.5 });
+  p.texture = tex; p.anchorX = 0.5; p.anchorY = 0.5; p.rotation = 0;
+  return p;
+}
+function compact(list, pcont) {
+  const arr = pcont.particleChildren; let j = 0;
+  for (let i = 0; i < list.length; i++) {
+    const o = list[i];
+    if (!o.dead) { list[j] = o; arr[j] = o.p; j++; } else particlePool.push(o.p);
+  }
+  if (j !== list.length) { list.length = j; arr.length = j; pcont.update(); }
+}
+
+/* ---------- spatial grid (linked lists in typed arrays) ---------- */
+const CELL = 48, GM = 160;
+let gCols = 1, gRows = 1, gHead = new Int32Array(1), gNext = new Int32Array(1024);
+function buildGrid() {
+  gCols = Math.ceil((W() + GM * 2) / CELL) + 1;
+  gRows = Math.ceil((H() + GM * 2) / CELL) + 1;
+  const n = gCols * gRows;
+  if (gHead.length < n) gHead = new Int32Array(n);
+  gHead.fill(-1, 0, n);
+  if (gNext.length < enemies.length) gNext = new Int32Array(enemies.length * 2);
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    const c = cellIndex(e.x, e.y);
+    gNext[i] = gHead[c]; gHead[c] = i;
+  }
+}
+function cellIndex(x, y) {
+  const cx = clamp(((x + GM) / CELL) | 0, 0, gCols - 1);
+  const cy = clamp(((y + GM) / CELL) | 0, 0, gRows - 1);
+  return cy * gCols + cx;
+}
+function forNeighbors(x, y, r, fn) {
+  const c0 = clamp(((x - r + GM) / CELL) | 0, 0, gCols - 1), c1 = clamp(((x + r + GM) / CELL) | 0, 0, gCols - 1);
+  const r0 = clamp(((y - r + GM) / CELL) | 0, 0, gRows - 1), r1 = clamp(((y + r + GM) / CELL) | 0, 0, gRows - 1);
+  for (let cy = r0; cy <= r1; cy++) for (let cx = c0; cx <= c1; cx++) {
+    for (let i = gHead[cy * gCols + cx]; i !== -1; i = gNext[i]) {
+      const e = enemies[i];
+      if (e && !e.dead) fn(e);
+    }
+  }
+}
+
+/* ============================================================
+   ENTITIES
+   ============================================================ */
+function spawnEnemy(ti, x, y, swarm) {
+  const T = TYPES[ti];
+  const p = getParticle(TEX.enemy[ti]);
+  const r = T.r * rand(0.9, 1.15);
+  p.x = x; p.y = y; p.scaleX = p.scaleY = 0.01; p.color = pc(T.bgr, 1);
+  const e = {
+    p, x, y, vx: 0, vy: 0, r, ti, born: 0,
+    speed: T.speed * rand(0.9, 1.1), steer: T.steer * rand(0.85, 1.15),
+    rot: Math.random() * 6.283, spin: (T.spin || 0) * (Math.random() < 0.5 ? -1 : 1),
+    swarm, near: false, closed: false, dead: false,
+  };
+  enemies.push(e); enemyPC.particleChildren.push(p);
+  return e;
+}
+
+function edgePoint(margin) {
+  const w = W(), h = H(), s = (Math.random() * 4) | 0;
+  if (s === 0) return [rand(0, w), -margin];
+  if (s === 1) return [w + margin, rand(0, h)];
+  if (s === 2) return [rand(0, w), h + margin];
+  return [-margin, rand(0, h)];
+}
+
+function spawnSwarm(count) {
+  const [cx, cy] = edgePoint(60);
+  const pool = level < 1 ? [0, 1] : level < 2 ? [0, 1, 2] : [0, 1, 2, 3];
+  const main = pool[(Math.random() * pool.length) | 0];
+  const swarm = { phase: Math.random() * 6.283, freq: rand(1.4, 2.8), amp: rand(0.3, 0.75) };
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * 6.283, d = rand(6, 26 + count * 2.2);
+    const ti = level >= 3 && Math.random() < 0.25 ? pool[(Math.random() * pool.length) | 0] : main;
+    spawnEnemy(ti, cx + Math.cos(a) * d, cy + Math.sin(a) * d, swarm);
+  }
+}
+
+function addDebris(x, y, bgr, n, speedMin, speedMax, sizeK) {
+  const cap = state === 'stress' ? 1e9 : MAX_DEBRIS_PLAY;
+  for (let i = 0; i < n && debris.length < cap; i++) {
+    const spark = i % 3 === 2, hot = i % 9 === 8;
+    const p = getParticle(spark ? TEX.spark : TEX.shard);
+    const a = Math.random() * 6.283, s = rand(speedMin, speedMax);
+    const vx = Math.cos(a) * s, vy = Math.sin(a) * s;
+    const k = sizeK * rand(0.55, 1.15);
+    p.x = x; p.y = y; p.rotation = a;
+    p.scaleX = spark ? k * 0.55 : k * (0.6 + s / 420); p.scaleY = spark ? k * 0.55 : k;
+    const col = hot ? BGR_WHITE : bgr;
+    p.color = pc(col, 0.8);
+    const life = rand(0.45, 1.05) * (spark ? 0.7 : 1);
+    debris.push({ p, x, y, vx, vy, life, max: life, bgr: col, sx: p.scaleX, sy: p.scaleY, drag: spark ? 2.6 : 1.9, dead: false });
+    fxPC.particleChildren.push(p);
+  }
+}
+
+function addLight(x, y, color, size, life, alpha = 0.85) {
+  if (lights.length > 48) return;          // additive washes stack fast; keep them bounded
+  const p = getParticle(TEX.glow);
+  p.x = x; p.y = y; p.scaleX = p.scaleY = size * 0.4;
+  const bgr = rgb2bgr(color);
+  p.color = pc(bgr, alpha);
+  lights.push({ p, size, life, max: life, bgr, alpha, dead: false });
+  lightPC.particleChildren.push(p);
+}
+
+function explode(x, y, bgr, color, r, c) {
+  // fewer fragments per blast when the screen is already full, so big chains stay colored instead of clipping to white
+  const load = state === 'stress' ? 1 : clamp(1 - debris.length / 2600, 0.3, 1);
+  const n = Math.round((12 + Math.min(16, c)) * load);
+  addDebris(x, y, bgr, n, 90, 430, r / 13);
+  addLight(x, y, color, 0.8 + r / 16, 0.4, 0.42);
+}
+
+function killEnemy(e) {
+  if (e.dead) return;
+  e.dead = true;
+  e.p.color = 0;
+  kills++; combo++; comboTimer = 1.15; comboPop = 1.45;
+  if (combo > maxCombo) maxCombo = combo;
+  if (state === 'play') score += 10 * Math.min(combo, 99);
+  const T = TYPES[e.ti];
+  explode(e.x, e.y, T.bgr, T.color, e.r, combo);
+  pending.push({ x: e.x, y: e.y, t: rand(0.065, 0.11), r: CHAIN_R + e.r });
+  sfx.boom(combo);
+  if (bigChainStep < BIG_CHAIN.length && combo >= BIG_CHAIN[bigChainStep]) {
+    shakeAmp = Math.max(shakeAmp, 5 + bigChainStep * 2.2);
+    slowTimer = 0.3 + bigChainStep * 0.04;
+    bigChainStep++;
+  }
+}
+
+function fireWave() {
+  energy = 0; drawRing();
+  waves.push({ x: player.x, y: player.y, r: 6, max: waveR, done: false });
+  addLight(player.x, player.y, COL.wave, waveR / 34, 0.55, 0.5);
+  shakeAmp = Math.max(shakeAmp, 4);
+  sfx.wave();
+}
+
+/* ---------- orbs ---------- */
+function placeOrb(o) {
+  const w = W(), h = H(), m = 34;
+  const top = insets.t + 80, bottom = h - insets.b - 40;
+  for (let k = 0; k < 20; k++) {
+    o.x = rand(insets.l + m, w - insets.r - m);
+    o.y = rand(top, Math.max(top + 10, bottom));
+    if (Math.hypot(o.x - player.x, o.y - player.y) > 120) break;
+  }
+  o.c.x = o.x; o.c.y = o.y; o.t = Math.random() * 6;
+}
+function makeOrb() {
+  const c = new PIXI.Container();
+  const halo = new PIXI.Sprite(TEX.glow); halo.anchor.set(0.5); halo.tint = COL.orb; halo.scale.set(0.42); halo.blendMode = 'add';
+  const core = new PIXI.Sprite(TEX.orb); core.anchor.set(0.5); core.tint = COL.orb; core.scale.set(0.42); core.blendMode = 'add';
+  c.addChild(halo, core); orbLayer.addChild(c);
+  const o = { c, core, halo, x: 0, y: 0, t: 0, respawn: 0, active: true };
+  orbs.push(o); placeOrb(o);
+  return o;
+}
+function syncOrbCount() {
+  while (orbs.length < orbTarget) makeOrb();
+  while (orbs.length > orbTarget) { const o = orbs.pop(); o.c.destroy({ children: true }); }
+}
+
+/* ---------- popups ("Close!") ---------- */
+function popup(x, y, text, color) {
+  let b = popups.find((q) => !q.visible);
+  if (!b) {
+    b = new PIXI.BitmapText({ text, style: textStyle(18, '800') });
+    b.anchor.set(0.5); popLayer.addChild(b); popups.push(b);
+  }
+  b.text = text; b.tint = color; b.visible = true; b.x = x; b.y = y; b.life = 0.85;
+}
+
+/* ---------- player ring = energy meter ---------- */
+function drawRing() {
+  ringG.clear();
+  const R = 21, seg = (Math.PI * 2) / 10, gap = 0.16;
+  for (let i = 0; i < 10; i++) {
+    const a0 = -Math.PI / 2 + i * seg + gap / 2, a1 = a0 + seg - gap;
+    const lit = i < energy;
+    ringG.moveTo(Math.cos(a0) * R, Math.sin(a0) * R).arc(0, 0, R, a0, a1)
+      .stroke({ width: lit ? 3 : 2, color: lit ? COL.orb : COL.dim, alpha: lit ? 1 : 0.6, cap: 'round' });
+  }
+}
+
+/* ============================================================
+   OVERLAYS (inside the bloomed world so the type glows)
+   ============================================================ */
+let overlayLayout = null, overlayAnim = null;
+function clearOverlay() { overlay.removeChildren().forEach((c) => c.destroy({ children: true })); overlayLayout = null; overlayAnim = null; }
+const glowText = (text, size, weight, color, glow, extra = {}) => new PIXI.Text({
+  text, style: textStyle(size, weight, { fill: color, dropShadow: { color: glow, blur: 14, distance: 0, alpha: 0.9, angle: 0 }, ...extra }),
+});
+
+function showTitle() {
+  clearOverlay();
+  const title = glowText('NEON SWARM', 64, '800', 0xffe3f1, COL.pink, { letterSpacing: 6 });
+  const tap = glowText('Tap to start', 22, '600', 0xffffff, COL.player);
+  const bestT = glowText(best > 0 ? 'Best ' + fmt(best) : 'Collect 10 orbs to fire a blast', 15, '500', 0xc9c3ff, 0x6b4cff);
+  const btn = new PIXI.Container();
+  const btnG = new PIXI.Graphics();
+  const btnT = glowText('Stress test', 17, '600', 0xbff9ff, COL.player);
+  btnT.anchor.set(0.5);
+  btnG.roundRect(-92, -25, 184, 50, 25).fill({ color: 0x0c0826, alpha: 0.85 }).stroke({ width: 2, color: COL.player, alpha: 0.9 });
+  btn.addChild(btnG, btnT);
+  btn.eventMode = 'static'; btn.cursor = 'pointer';
+  btn.hitArea = new PIXI.Rectangle(-100, -32, 200, 64);
+  btn.on('pointerdown', (e) => { e.stopPropagation(); sfx.init(); startStress(); });
+  [title, tap, bestT].forEach((t) => t.anchor.set(0.5));
+  overlay.addChild(title, tap, bestT, btn);
+  overlayLayout = () => {
+    const w = W(), h = H();
+    title.scale.set(Math.min(1.25, (w * 0.86) / (title.width / title.scale.x)));
+    title.position.set(w / 2, h * 0.36);
+    tap.position.set(w / 2, h * 0.36 + title.height * 0.5 + 44);
+    bestT.position.set(w / 2, tap.y + 34);
+    btn.position.set(w / 2, Math.min(h - insets.b - 60, bestT.y + 92));
+  };
+  let t = 0;
+  overlayAnim = (dt) => {           // neon tube ignition, then a slow breathing prompt
+    t += dt;
+    title.alpha = t < 0.9 ? (Math.random() < t / 0.9 ? 1 : 0.15) : 1;
+    tap.alpha = 0.55 + 0.45 * Math.sin(t * 3.2) ** 2;
+  };
+  overlayLayout();
+}
+
+function showGameOver() {
+  clearOverlay();
+  const go = glowText('Game over', 48, '800', 0xffe3f1, COL.pink, { letterSpacing: 2 });
+  const sl = glowText('Score', 15, '500', 0xc9c3ff, 0x6b4cff);
+  const sv = glowText(fmt(score), 54, '800', 0xffffff, COL.player);
+  const bt = glowText(newBest ? 'New best' : 'Best ' + fmt(best), 18, '600', newBest ? COL.orb : 0xc9c3ff, newBest ? COL.orb : 0x6b4cff);
+  const stats = glowText(`${kills} destroyed   Combo x${maxCombo}   ${Math.floor(tGame)}s`, 14, '500', 0xb0a8e8, 0x3b2a8a);
+  const tap = glowText('Tap to play again', 20, '600', 0xffffff, COL.player);
+  [go, sl, sv, bt, stats, tap].forEach((t) => t.anchor.set(0.5));
+  overlay.addChild(go, sl, sv, bt, stats, tap);
+  overlayLayout = () => {
+    const w = W(), h = H(), cy = h * 0.42;
+    go.scale.set(Math.min(1, (w * 0.84) / (go.width / go.scale.x)));
+    go.position.set(w / 2, cy - 92); sl.position.set(w / 2, cy - 30); sv.position.set(w / 2, cy + 14);
+    bt.position.set(w / 2, cy + 64); stats.position.set(w / 2, cy + 94); tap.position.set(w / 2, cy + 150);
+  };
+  let t = 0;
+  overlayAnim = (dt) => { t += dt; tap.alpha = t < 0.35 ? 0 : 0.55 + 0.45 * Math.sin(t * 3.2) ** 2; };
+  overlayLayout();
+}
+
+function showStressResult() {
+  clearOverlay();
+  const head = glowText('Stress test', 30, '800', 0xbff9ff, COL.player);
+  const big = glowText(fmt(stressMax), 64, '800', 0xffffff, COL.pink);
+  const lbl = glowText('objects on screen at peak', 16, '500', 0xc9c3ff, 0x6b4cff);
+  const split = glowText(`${fmt(stressPeakE)} enemies + ${fmt(stressPeakD)} debris`, 15, '500', 0xb0a8e8, 0x3b2a8a);
+  const why = glowText(stressReason, 14, '500', 0xb0a8e8, 0x3b2a8a);
+  const tap = glowText('Tap to return', 20, '600', 0xffffff, COL.player);
+  [head, big, lbl, split, why, tap].forEach((t) => t.anchor.set(0.5));
+  overlay.addChild(head, big, lbl, split, why, tap);
+  overlayLayout = () => {
+    const w = W(), h = H(), cy = h * 0.42;
+    big.scale.set(Math.min(1, (w * 0.86) / (big.width / big.scale.x)));
+    head.position.set(w / 2, cy - 90); big.position.set(w / 2, cy - 18); lbl.position.set(w / 2, cy + 34);
+    split.position.set(w / 2, cy + 66); why.position.set(w / 2, cy + 92); tap.position.set(w / 2, cy + 150);
+  };
+  let t = 0;
+  overlayAnim = (dt) => { t += dt; tap.alpha = t < 0.5 ? 0 : 0.55 + 0.45 * Math.sin(t * 3.2) ** 2; };
+  overlayLayout();
+}
+
+/* ============================================================
+   FLOW
+   ============================================================ */
+function clearWorld() {
+  enemies.forEach((e) => { e.dead = true; });
+  debris.forEach((d) => { d.dead = true; });
+  lights.forEach((l) => { l.dead = true; });
+  compact(enemies, enemyPC); compact(debris, fxPC); compact(lights, lightPC);
+  waves.length = 0; pending = [];
+  popups.forEach((p) => { p.visible = false; });
+  combo = 0; comboTimer = 0; bigChainStep = 0; maxCombo = 0;
+  timeScale = 1; slowTimer = 0; shakeAmp = 0;
+}
+
+function resetTrail() { for (const p of trail) { p.x = player.x; p.y = player.y; } }
+
+function startGame(x, y) {
+  clearWorld(); clearOverlay();
+  state = 'play';
+  tGame = 0; score = 0; kills = 0; energy = 0; level = 0; spawnTimer = 1.0; newBest = false;
+  player.x = player.tx = x; player.y = player.ty = y; player.alive = true;
+  resetTrail();
+  playerC.visible = true; drawRing();
+  orbs.forEach(placeOrb);
+  sfx.start();
+}
+
+function die() {
+  state = 'over'; overT = 0; player.alive = false; playerC.visible = false;
+  addDebris(player.x, player.y, BGR_PLAYER, 46, 120, 620, 1.3);
+  addDebris(player.x, player.y, BGR_WHITE, 20, 60, 300, 1);
+  addLight(player.x, player.y, COL.player, 5, 0.9, 0.9);
+  shakeAmp = 13; slowTimer = 0.55;
+  sfx.death();
+  if (score > best) { best = Math.floor(score); newBest = true; saveBest(best); }
+  showGameOver();
+}
+
+function toTitle() {
+  clearWorld();
+  state = 'title';
+  playerC.visible = false;
+  player.x = player.tx = W() / 2; player.y = player.ty = H() / 2;
+  for (let i = 0; i < 4; i++) spawnSwarm(7);
+  showTitle();
+}
+
+function startStress() {
+  clearWorld(); clearOverlay();
+  state = 'stress';
+  stressT = 0; stressAcc = 0; stressMax = 0; stressPeakE = 0; stressPeakD = 0;
+  ftCount = 0; ftHead = 0;
+  player.x = player.tx = W() / 2; player.y = player.ty = H() / 2; player.alive = true;
+  resetTrail();
+  playerC.visible = true; energy = 0; drawRing();
+}
+
+function endStress(reason) {
+  state = 'stressDone';
+  stressAvg = avg3;
+  stressReason = reason;
+  enemies.forEach((e) => { e.dead = true; e.p.color = 0; });   // free the GPU so the result screen stays responsive
+  showStressResult();
+}
+
+/* ---------- input ---------- */
+app.stage.eventMode = 'static';
+app.stage.hitArea = app.screen;
+function aim(e) {
+  const touch = e.pointerType === 'touch' || e.pointerType === 'pen';
+  player.tx = clamp(e.global.x, 4, W() - 4);
+  player.ty = clamp(e.global.y - (touch ? touchOffset : 0), 4, H() - 4);
+}
+app.stage.on('pointerdown', (e) => {
+  sfx.init();
+  if (state === 'title') { aim(e); startGame(player.tx, player.ty); return; }
+  if (state === 'over') { if (overT > 0.3) { aim(e); startGame(player.tx, player.ty); } return; }
+  if (state === 'stressDone') { toTitle(); return; }
+  aim(e);
+});
+app.stage.on('globalpointermove', (e) => {
+  if (state === 'play' || state === 'stress') {
+    aim(e);
+  }
+});
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' && e.code !== 'Enter') return;
+  sfx.init();
+  if (state === 'title' || (state === 'over' && overT > 0.3)) startGame(W() / 2, H() / 2);
+  else if (state === 'stressDone') toTitle();
+});
+
+/* ---------- layout / resize (rotation, foldables) ---------- */
+const safeEl = document.getElementById('safe');
+function readInsets() {
+  const cs = getComputedStyle(safeEl);
+  insets.t = parseFloat(cs.paddingTop) || 0; insets.r = parseFloat(cs.paddingRight) || 0;
+  insets.b = parseFloat(cs.paddingBottom) || 0; insets.l = parseFloat(cs.paddingLeft) || 0;
+}
+function drawBg() {
+  const w = W(), h = H(), step = 44;
+  bgGrid.clear();
+  bgGrid.rect(0, 0, w, h).fill(COL.bg);
+  const ox = (w / 2) % step, oy = (h / 2) % step;
+  for (let x = ox; x <= w; x += step) bgGrid.moveTo(x, 0).lineTo(x, h);
+  for (let y = oy; y <= h; y += step) bgGrid.moveTo(0, y).lineTo(w, y);
+  bgGrid.stroke({ width: 1, color: COL.grid, alpha: 0.55 });
+  for (let x = ox; x <= w; x += step * 4) bgGrid.moveTo(x, 0).lineTo(x, h);
+  for (let y = oy; y <= h; y += step * 4) bgGrid.moveTo(0, y).lineTo(w, y);
+  bgGrid.stroke({ width: 1.5, color: COL.gridMajor, alpha: 0.6 });
+  bgGlow.position.set(w / 2, h / 2);
+  bgGlow.scale.set((Math.max(w, h) * 1.3) / 128);
+}
+function layout() {
+  readInsets();
+  const w = W(), h = H(), m = Math.min(w, h);
+  drawBg();
+  speedScale = clamp(Math.sqrt(w * h) / 720, 0.75, 1.3);
+  waveR = clamp(m * 0.42, 150, 300);
+  touchOffset = clamp(m * 0.12, 56, 90);
+  orbTarget = clamp(Math.round((w * h) / 95000), 4, 8);
+  syncOrbCount();
+  // fold / unfold / rotate: keep everything at the same relative spot instead of squashing or clipping it
+  if (lastW && lastH && (lastW !== w || lastH !== h)) {
+    const kx = w / lastW, ky = h / lastH;
+    player.x *= kx; player.y *= ky; player.tx *= kx; player.ty *= ky;
+    for (const p of trail) { p.x *= kx; p.y *= ky; }
+    for (const o of orbs) { o.x *= kx; o.y *= ky; o.c.position.set(o.x, o.y); }
+    for (const e of enemies) { e.x *= kx; e.y *= ky; }
+    player.shield = 0.8;                       // a fold mid-round must never cause a death
+  }
+  lastW = w; lastH = h;
+  player.x = clamp(player.x, 4, w - 4); player.y = clamp(player.y, 4, h - 4);
+  player.tx = clamp(player.tx, 4, w - 4); player.ty = clamp(player.ty, 4, h - 4);
+  const L = insets.l + 16, R = w - insets.r - 16, T = insets.t + 12;
+  hScoreLabel.position.set(L, T); hScore.position.set(L, T + 16); hLevel.position.set(L, T + 52);
+  hBestLabel.position.set(R, T); hBest.position.set(R, T + 16);
+  hCombo.position.set(w / 2, T + 100);
+  hPerf.position.set(insets.l + 12, h - insets.b - 10);
+  if (overlayLayout) overlayLayout();
+}
+app.renderer.on('resize', layout);
+window.addEventListener('orientationchange', () => setTimeout(() => app.resize(), 120));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', () => app.resize());
+
+/* ============================================================
+   UPDATE
+   ============================================================ */
+function updateEnemies(dt) {
+  const speedMul = (1 + 0.11 * level) * speedScale;
+  const tx = player.x, ty = player.y;
+  const doSep = enemies.length < 2500;
+  const SEP = 22, SEP2 = SEP * SEP;
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    if (e.dead) continue;
+    let dx = tx - e.x, dy = ty - e.y;
+    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+    dx /= d; dy /= d;
+    const sw = e.swarm;
+    if (sw) {
+      const k = Math.sin(tGame * sw.freq + sw.phase) * sw.amp * Math.min(1, d / 160);
+      const px = -dy, py = dx; dx += px * k; dy += py * k;
+    }
+    if (doSep) {
+      let sx = 0, sy = 0;
+      forNeighbors(e.x, e.y, SEP, (o) => {
+        if (o === e) return;
+        const ox = e.x - o.x, oy = e.y - o.y, dd = ox * ox + oy * oy;
+        if (dd < SEP2 && dd > 0.01) { const q = Math.sqrt(dd); const f = (SEP - q) / (SEP * q); sx += ox * f; sy += oy * f; }
+      });
+      dx += sx * 1.6; dy += sy * 1.6;
+    }
+    const spd = e.speed * speedMul;
+    const k = Math.min(1, e.steer * dt);
+    e.vx += (dx * spd - e.vx) * k;
+    e.vy += (dy * spd - e.vy) * k;
+    e.x += e.vx * dt; e.y += e.vy * dt;
+    const T = TYPES[e.ti];
+    if (T.face) e.rot = Math.atan2(e.vy, e.vx); else e.rot += e.spin * dt;
+    if (e.born < 1) e.born = Math.min(1, e.born + dt * 4);
+    const p = e.p, s = (e.r / 40) * (e.born < 1 ? 0.4 + 0.6 * e.born : 1);
+    p.x = e.x; p.y = e.y; p.rotation = e.rot; p.scaleX = p.scaleY = s;
+  }
+}
+
+function updateCollisions() {
+  const px = player.x, py = player.y, pr = player.r;
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    if (e.dead) continue;
+    const dx = e.x - px, dy = e.y - py, d = Math.sqrt(dx * dx + dy * dy);
+    if (d < e.r * 0.72 + pr * 0.85) {
+      if (state === 'play' && player.shield <= 0) { die(); return; }
+      continue;
+    }
+    const nearD = e.r + pr + 24;
+    if (d < nearD) e.near = true;
+    else if (e.near && d > nearD + 6) {
+      e.near = false;
+      if (!e.closed && state === 'play') {
+        e.closed = true;
+        const bonus = 50 + level * 25;
+        score += bonus;
+        if (tGame - lastCloseText > 0.18) {
+          lastCloseText = tGame;
+          popup(px, py - 30, 'Close! +' + bonus, COL.player);
+          sfx.close();
+        }
+      }
+    }
+  }
+}
+
+function updateWaves(dt) {
+  waveG.clear();
+  for (let i = waves.length - 1; i >= 0; i--) {
+    const w = waves[i];
+    w.r += (w.max / 0.42) * dt;
+    const k = w.r / w.max;
+    if (!w.done) {
+      const r2 = w.r * w.r;
+      for (let j = 0; j < enemies.length; j++) {
+        const e = enemies[j];
+        if (e.dead) continue;
+        const dx = e.x - w.x, dy = e.y - w.y;
+        if (dx * dx + dy * dy < r2) killEnemy(e);
+      }
+      if (k >= 1) w.done = true;
+    }
+    const a = clamp(1.25 - k, 0, 1);
+    if (a <= 0) { waves.splice(i, 1); continue; }
+    waveG.circle(w.x, w.y, w.r).fill({ color: COL.wave, alpha: 0.05 * a });
+    waveG.circle(w.x, w.y, w.r).stroke({ width: 3 + 12 * (1 - k), color: COL.wave, alpha: 0.85 * a });
+    waveG.circle(w.x, w.y, w.r * 0.94).stroke({ width: 1.5, color: 0xffffff, alpha: 0.6 * a });
+  }
+}
+
+function updatePending(dt) {
+  const cur = pending; pending = [];
+  for (let i = 0; i < cur.length; i++) {
+    const q = cur[i];
+    q.t -= dt;
+    if (q.t > 0) { pending.push(q); continue; }
+    const r2 = q.r * q.r;
+    forNeighbors(q.x, q.y, q.r, (e) => {
+      const dx = e.x - q.x, dy = e.y - q.y;
+      if (dx * dx + dy * dy < r2) killEnemy(e);
+    });
+  }
+}
+
+function updateDebris(dt) {
+  for (let i = 0; i < debris.length; i++) {
+    const d = debris[i];
+    d.life -= dt;
+    if (d.life <= 0) { d.dead = true; continue; }
+    const f = Math.exp(-d.drag * dt);
+    d.vx *= f; d.vy *= f;
+    d.x += d.vx * dt; d.y += d.vy * dt;
+    const k = d.life / d.max, p = d.p;
+    p.x = d.x; p.y = d.y;
+    p.scaleX = d.sx * (0.35 + 0.65 * k);
+    p.color = pc(d.bgr, 0.8 * k * k);
+  }
+  for (let i = 0; i < lights.length; i++) {
+    const l = lights[i];
+    l.life -= dt;
+    if (l.life <= 0) { l.dead = true; continue; }
+    const k = l.life / l.max, p = l.p;
+    p.scaleX = p.scaleY = l.size * (1.15 - 0.75 * k * k);
+    p.color = pc(l.bgr, l.alpha * k * k);
+  }
+}
+
+function updateOrbs(dt) {
+  for (const o of orbs) {
+    o.t += dt;
+    if (!o.active) {
+      o.respawn -= dt;
+      if (o.respawn <= 0) { o.active = true; placeOrb(o); o.c.visible = true; o.c.scale.set(0.01); }
+      continue;
+    }
+    const pulse = 1 + 0.12 * Math.sin(o.t * 5);
+    const s = o.c.scale.x < 1 ? Math.min(1, o.c.scale.x + dt * 5) : 1;
+    o.c.scale.set(s); o.core.scale.set(0.42 * pulse); o.core.rotation += dt;
+    if (state === 'play' && Math.hypot(o.x - player.x, o.y - player.y) < player.r + 20) {
+      o.active = false; o.respawn = 0.6; o.c.visible = false;
+      energy = Math.min(10, energy + 1);
+      addDebris(o.x, o.y, BGR_ORB, 10, 60, 220, 0.6);
+      addLight(o.x, o.y, COL.orb, 1.2, 0.3, 0.6);
+      sfx.pickup(energy);
+      drawRing();
+      if (energy >= 10) fireWave();
+    }
+  }
+}
+
+function updatePlayer(dt, dtReal) {
+  if (player.shield > 0) { player.shield -= dtReal; playerC.alpha = 0.55 + 0.45 * Math.abs(Math.sin(player.shield * 20)); } else playerC.alpha = 1;
+  const f = 1 - Math.exp(-22 * dtReal);
+  player.x += (player.tx - player.x) * f;
+  player.y += (player.ty - player.y) * f;
+  for (let i = TRAIL_N - 1; i > 0; i--) { trail[i].x = trail[i - 1].x; trail[i].y = trail[i - 1].y; }
+  trail[0].x = player.x; trail[0].y = player.y;
+  playerC.position.set(player.x, player.y);
+  pHalo.scale.set(0.48 + 0.04 * Math.sin(tGame * 9));
+  ringG.rotation += dt * 0.6;
+  trailG.clear();
+  if (!playerC.visible) return;
+  for (let i = 1; i < TRAIL_N; i++) {
+    const a = trail[i - 1], b = trail[i];
+    if (a.x === b.x && a.y === b.y) continue;
+    const k = 1 - i / TRAIL_N;
+    trailG.moveTo(a.x, a.y).lineTo(b.x, b.y)
+      .stroke({ width: 1 + player.r * 1.9 * k, color: COL.player, alpha: 0.9 * k, cap: 'round' });
+  }
+}
+
+function updatePopups(dt) {
+  for (const b of popups) {
+    if (!b.visible) continue;
+    b.life -= dt;
+    if (b.life <= 0) { b.visible = false; continue; }
+    b.y -= 40 * dt;
+    const k = b.life / 0.85;
+    b.alpha = Math.min(1, k * 2);
+    b.scale.set(k > 0.85 ? 1 + (k - 0.85) * 3 : 1);
+  }
+}
+
+function updateStress(rawDt) {
+  // stress clock runs on wall time (not the 50 ms-capped game step) so slow devices still finish on time
+  stressT += rawDt;
+  const dtReal = Math.min(rawDt, 0.25);
+  // player auto-pilot so the swarm keeps moving
+  const w = W(), h = H();
+  player.tx = w / 2 + Math.sin(stressT * 0.9) * w * 0.32;
+  player.ty = h / 2 + Math.sin(stressT * 1.3 + 1) * h * 0.3;
+  // enemies: spawn rate keeps climbing
+  stressAcc += (120 + 70 * stressT) * dtReal;
+  let n = Math.min(4000, stressAcc | 0); stressAcc -= n;
+  while (n > 0) {
+    const [cx, cy] = edgePoint(40);
+    const swarm = { phase: Math.random() * 6.283, freq: rand(1.4, 2.8), amp: rand(0.3, 0.75) };
+    const ti = (Math.random() * 4) | 0;
+    const g = Math.min(n, 24);
+    for (let i = 0; i < g; i++) spawnEnemy(ti, cx + rand(-30, 30), cy + rand(-30, 30), swarm);
+    n -= g;
+  }
+  // debris: keep roughly one live fragment per enemy
+  let budget = Math.min(5000, enemies.length - debris.length);
+  while (budget > 0 && enemies.length) {
+    const e = enemies[(Math.random() * enemies.length) | 0];
+    const T = TYPES[e.ti];
+    const c = Math.min(budget, 18);
+    addDebris(e.x, e.y, T.bgr, c, 80, 380, 0.9);
+    if (Math.random() < 0.3) addLight(e.x, e.y, T.color, 1.4, 0.4, 0.6);
+    budget -= c;
+  }
+  if (Math.random() < 0.08) sfx.boom(1 + ((stressT * 2) | 0) % 16);
+  const objs = enemies.length + debris.length;
+  if (objs > stressMax) { stressMax = objs; stressPeakE = enemies.length; stressPeakD = debris.length; }
+  if (stressT > 3.2 && avg3 > 0 && avg3 < 50) endStress(`Stopped when the 3-second average fell to ${avg3.toFixed(1)} fps`);
+  else if (stressT > 120) endStress(`Time limit reached; still ${avg3.toFixed(1)} fps`);
+}
+
+function updatePlay(dt) {
+  tGame += dt;
+  score += 25 * dt;                      // survival points
+  const lv = Math.floor(tGame / ROUND_TIME_PER_LEVEL);
+  if (lv > level) {
+    level = lv; sfx.level();
+    if (enemies.length < 280) spawnSwarm(Math.min(28, 6 + level * 3));
+  }
+  spawnTimer -= dt;
+  if (spawnTimer <= 0) {
+    spawnTimer = Math.max(0.6, 2.4 - 0.26 * level) * rand(0.8, 1.2);
+    if (enemies.length < 300) spawnSwarm(Math.min(26, 4 + level * 2 + ((Math.random() * 4) | 0)));
+  }
+}
+
+function measureFrame(now) {
+  frameTimes[ftHead] = now; ftHead = (ftHead + 1) % frameTimes.length; ftCount = Math.min(ftCount + 1, frameTimes.length);
+  let n3 = 0, n05 = 0, oldest3 = now, oldest05 = now;
+  for (let i = 1; i <= ftCount; i++) {
+    const t = frameTimes[(ftHead - i + frameTimes.length) % frameTimes.length];
+    const age = now - t;
+    if (age > 3000) break;
+    n3++; oldest3 = t;
+    if (age <= 500) { n05++; oldest05 = t; }
+  }
+  avg3 = n3 >= 2 && now - oldest3 > 2500 ? ((n3 - 1) * 1000) / (now - oldest3) : 0;
+  fps = n05 > 1 ? ((n05 - 1) * 1000) / (now - oldest05) : fps;
+}
+
+/* ============================================================
+   MAIN LOOP
+   ============================================================ */
+app.ticker.add((ticker) => {
+  const now = performance.now();
+  const wallDt = lastNow ? Math.min((now - lastNow) / 1000, 1) : 0;   // Pixi caps deltaMS at 100 ms; stress timing needs wall time
+  lastNow = now;
+  measureFrame(now);
+  const dtReal = Math.min(ticker.deltaMS / 1000, 0.05);
+
+  // slow motion after big chains
+  if (slowTimer > 0) { slowTimer -= dtReal; timeScale += (0.25 - timeScale) * Math.min(1, dtReal * 30); }
+  else timeScale += (1 - timeScale) * Math.min(1, dtReal * 5);
+  const dt = dtReal * timeScale;
+
+  compact(enemies, enemyPC);
+  compact(debris, fxPC);
+  compact(lights, lightPC);
+  buildGrid();
+
+  if (state === 'play') updatePlay(dt);
+  else if (state === 'over') { overT += dtReal; tGame += dt; }
+  else if (state === 'stress') { updateStress(wallDt); tGame += dt; }
+  else if (state === 'title') {
+    tGame += dt;
+    player.x = W() / 2 + Math.sin(tGame * 0.5) * W() * 0.3;
+    player.y = H() / 2 + Math.sin(tGame * 0.7) * H() * 0.25;
+    if (enemies.length < 24) spawnSwarm(6);
+  }
+
+  if (state === 'play' || state === 'stress') updatePlayer(dt, dtReal);
+  else trailG.clear();
+  updateEnemies(dt);
+  updateWaves(dt);
+  updatePending(dt);
+  if (state === 'play' || state === 'stress') updateCollisions();
+  updateOrbs(dt);
+  updateDebris(dt);
+  updatePopups(dt);
+  orbLayer.visible = state === 'play' || state === 'over';
+
+  // combo
+  if (comboTimer > 0) {
+    comboTimer -= dtReal;
+    if (comboTimer <= 0) { combo = 0; bigChainStep = 0; }
+  }
+  comboPop += (1 - comboPop) * Math.min(1, dtReal * 10);
+  hCombo.visible = combo >= 2 && state !== 'title';
+  if (hCombo.visible) { hCombo.text = 'Combo x' + combo; hCombo.scale.set(comboPop); }
+
+  // screen shake (real time so it settles during slow motion)
+  shakeAmp *= Math.exp(-dtReal * 7);
+  if (shakeAmp > 0.3) world.position.set((Math.random() - 0.5) * 2 * shakeAmp, (Math.random() - 0.5) * 2 * shakeAmp);
+  else world.position.set(0, 0);
+
+  if (overlayAnim) overlayAnim(dtReal);
+
+  // HUD
+  hudTimer -= dtReal; perfTimer -= dtReal;
+  if (hudTimer <= 0) {
+    hudTimer = 0.1;
+    const playing = state === 'play' || state === 'over';
+    const stressing = state === 'stress' || state === 'stressDone';
+    hScoreLabel.visible = hScore.visible = hBestLabel.visible = hBest.visible = playing || stressing;
+    hLevel.visible = playing;
+    if (playing) {
+      if (hScoreLabel.text !== 'Score') { hScoreLabel.text = 'Score'; hBestLabel.text = 'Best'; }
+      hScore.text = fmt(score); hBest.text = fmt(Math.max(best, state === 'play' ? score : 0));
+      hLevel.text = 'Level ' + (level + 1);
+    } else if (stressing) {
+      if (hScoreLabel.text !== 'Objects') { hScoreLabel.text = 'Objects'; hBestLabel.text = '3s avg fps'; }
+      hScore.text = fmt(enemies.length + debris.length);
+      hBest.text = avg3 > 0 ? avg3.toFixed(1) : '…';
+    }
+  }
+  if (perfTimer <= 0) {
+    perfTimer = 0.25;
+    hPerf.text = `${Math.round(fps)} fps   ${fmt(enemies.length + debris.length)} objects`;
+  }
+});
+
+/* ---------- boot ---------- */
+layout();
+drawRing();
+toTitle();
+window.__neonSwarm = { get state() { return state; }, get objects() { return enemies.length + debris.length; },
+  get stressMax() { return stressMax; }, get score() { return score; }, get fps() { return fps; } };
+})().catch((err) => {
+  const el = document.getElementById('fatal');
+  el.textContent = 'Neon Swarm stopped: ' + (err && err.message ? err.message : err);
+  el.style.display = 'flex';
+});
+</script>
+</body>
+</html>

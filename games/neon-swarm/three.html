@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#04030a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Neon Swarm</title>
+<style>
+:root{
+  --bg:#04030a; --fg:#eef8ff; --dim:#8c94c4; --cyan:#41f3ff; --pink:#ff2f92; --lime:#cbff3d; --violet:#a64dff;
+  --ui:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --num:ui-monospace,"SF Mono",Menlo,Consolas,"Roboto Mono",monospace;
+  --st:env(safe-area-inset-top,0px); --sr:env(safe-area-inset-right,0px);
+  --sb:env(safe-area-inset-bottom,0px); --sl:env(safe-area-inset-left,0px);
+}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);font-family:var(--ui);
+  overscroll-behavior:none;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+  -webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{position:fixed;inset:0}
+canvas{position:fixed;inset:0;width:100%!important;height:100%!important;display:block;touch-action:none;outline:none}
+.hud{position:fixed;z-index:2;pointer-events:none}
+#score{left:calc(var(--sl) + 14px);top:calc(var(--st) + 10px)}
+.lab{font-size:12px;font-weight:600;color:var(--dim);letter-spacing:.04em}
+#scoreVal{font:800 28px/1.05 var(--num);color:#fff;font-variant-numeric:tabular-nums;
+  text-shadow:0 0 8px rgba(65,243,255,.8),0 0 22px rgba(65,243,255,.35)}
+#bestVal{margin-top:3px;font:600 13px var(--num);color:var(--dim)}
+#perf{right:calc(var(--sr) + 10px);top:calc(var(--st) + 10px);font:600 12px/1.4 var(--num);text-align:right;color:#b9ffdc;
+  background:rgba(4,3,10,.6);border:1px solid rgba(120,255,200,.2);padding:5px 8px;border-radius:6px;font-variant-numeric:tabular-nums}
+#energy{left:50%;bottom:calc(var(--sb) + 18px);transform:translateX(-50%);display:flex;gap:7px}
+#energy i{width:11px;height:11px;transform:rotate(45deg);border:1px solid rgba(203,255,61,.5);background:rgba(203,255,61,.06);transition:background .12s}
+#energy i.on{background:var(--lime);border-color:#fff;box-shadow:0 0 8px var(--lime),0 0 18px rgba(203,255,61,.7)}
+#combo{left:50%;top:calc(var(--st) + 24%);transform:translate(-50%,-50%);font:900 30px/1 var(--ui);letter-spacing:.02em;white-space:nowrap;
+  color:#fff;opacity:0;transition:opacity .25s;text-shadow:0 0 10px var(--pink),0 0 28px var(--pink)}
+#combo.show{opacity:1}
+#combo.pop{animation:pop .18s ease-out}
+@keyframes pop{0%{transform:translate(-50%,-50%) scale(1.35)}100%{transform:translate(-50%,-50%) scale(1)}}
+#banner{left:50%;top:42%;transform:translate(-50%,-50%);font:800 22px var(--ui);color:#fff;opacity:0;white-space:nowrap;
+  text-shadow:0 0 10px var(--violet),0 0 26px var(--violet)}
+#banner.go{animation:banner 1.3s ease-out forwards}
+@keyframes banner{0%{opacity:0;transform:translate(-50%,-30%)}15%{opacity:1;transform:translate(-50%,-50%)}75%{opacity:1}100%{opacity:0;transform:translate(-50%,-70%)}}
+#stressInfo{left:50%;top:calc(var(--st) + 12px);transform:translateX(-50%);font:700 14px var(--ui);color:#ffd36b;display:none;
+  text-shadow:0 0 10px rgba(255,180,60,.8);text-align:center}
+.float{position:fixed;z-index:3;pointer-events:none;left:0;top:0;transform:translate(-50%,-50%);font:900 19px var(--ui);color:#fff;opacity:0;white-space:nowrap}
+.float.close{text-shadow:0 0 8px var(--cyan),0 0 20px var(--cyan)}
+.float.go{animation:floatUp .8s ease-out forwards}
+@keyframes floatUp{0%{opacity:0;transform:translate(-50%,-30%) scale(.7)}15%{opacity:1;transform:translate(-50%,-60%) scale(1.1)}100%{opacity:0;transform:translate(-50%,-190%) scale(1)}}
+#overlay{position:fixed;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center;
+  padding:calc(var(--st) + 24px) calc(var(--sr) + 20px) calc(var(--sb) + 24px) calc(var(--sl) + 20px);cursor:pointer;touch-action:none;
+  background:radial-gradient(ellipse at center,rgba(4,3,10,.15) 0%,rgba(4,3,10,.72) 75%)}
+#overlay.hidden{display:none}
+.title{font:900 clamp(48px,13vw,104px)/.9 var(--ui);letter-spacing:-.01em;color:#fff;
+  text-shadow:0 0 6px #fff,0 0 18px var(--cyan),0 0 42px var(--cyan),0 0 90px var(--pink)}
+.title.over{font-size:clamp(40px,10vw,76px);text-shadow:0 0 6px #fff,0 0 20px var(--pink),0 0 50px var(--pink)}
+.ovScore{font:800 22px var(--num);color:#fff}
+.ovBest{font:600 15px var(--num);color:var(--dim)}
+.newBest{color:var(--lime);text-shadow:0 0 12px var(--lime)}
+.tap{margin-top:6px;font:800 19px var(--ui);color:var(--cyan);text-shadow:0 0 10px var(--cyan);animation:breathe 1.4s ease-in-out infinite}
+@keyframes breathe{50%{opacity:.45}}
+.hint{font:500 14px var(--ui);color:var(--dim);max-width:30ch;line-height:1.4}
+#stressBtn{margin-top:10px;font:700 15px var(--ui);color:#ffd36b;background:rgba(255,180,60,.08);border:1px solid rgba(255,190,80,.55);
+  border-radius:999px;padding:10px 22px;cursor:pointer;touch-action:none}
+#stressBtn:focus-visible{outline:2px solid #ffd36b;outline-offset:3px}
+.res{font:600 16px/1.6 var(--num);color:#fff}
+.res b{font-size:30px;color:#ffd36b;text-shadow:0 0 14px rgba(255,180,60,.8)}
+#err{position:fixed;inset:auto 0 0 0;z-index:9;padding:14px;font:600 14px var(--ui);color:#ffb3c8;background:#200814;display:none;text-align:center}
+@media (prefers-reduced-motion:reduce){.tap{animation:none}}
+</style>
+</head>
+<body>
+<div id="score" class="hud"><div class="lab">Score</div><div id="scoreVal">0</div><div id="bestVal">Best 0</div></div>
+<div id="perf" class="hud">FPS --<br>Obj 0</div>
+<div id="stressInfo" class="hud">Stress test</div>
+<div id="energy" class="hud"></div>
+<div id="combo" class="hud">Combo ×0</div>
+<div id="banner" class="hud"></div>
+<div id="overlay"></div>
+<div id="err"></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+} }
+</script>
+<script>
+// Báo lỗi nếu three.js không nạp được (ví dụ mất mạng)
+window.addEventListener('error', function (e) { var el = document.getElementById('err'); el.style.display = 'block'; el.textContent = 'Error: ' + (e.message || 'script failed'); });
+setTimeout(function () { if (!window.__nsLoaded) { var el = document.getElementById('err'); el.style.display = 'block'; el.textContent = 'Could not load three.js 0.186.1 from cdn.jsdelivr.net. Check the connection and reload.'; } }, 12000);
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+window.__nsLoaded = true;
+
+// ================================================================ CONFIG
+const ENEMY_CAP = 24000, DEBRIS_CAP = 96000, FLASH_CAP = 700, LIGHT_POOL = 8, ORB_COUNT = 7, TRAIL_N = 44;
+const HALF_SHORT = 10;                       // nửa cạnh ngắn của sân (đơn vị thế giới)
+const TILT = THREE.MathUtils.degToRad(24);   // góc nghiêng camera so với phương thẳng đứng
+const PLAYER_R = 0.3, ENEMY_R = 0.42, PLAYER_Y = 0.5, ENEMY_Y = 0.55, PLAYER_SPEED = 20;
+const CHAIN_R = 1.75, WAVE_R = 7.5, WAVE_T = 0.5, ORBS_PER_WAVE = 10, LEVEL_SECONDS = 15;
+const CELL = 1.8, CLOSE_BONUS = 25;
+const COARSE = matchMedia('(pointer: coarse)').matches;
+const PR = Math.min(window.devicePixelRatio || 1, COARSE ? 1.75 : 2);
+const TAU = Math.PI * 2;
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const $ = (id) => document.getElementById(id);
+
+// ================================================================ RENDERER + BLOOM
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+renderer.setPixelRatio(PR);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.setClearColor(0x04030a, 1);
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x04030a, 0.01);
+const camera = new THREE.PerspectiveCamera(45, 1, 1, 400);
+const camBase = new THREE.Vector3();
+
+// Render target HDR (half float) có MSAA → bloom ăn được màu > 1.0
+const rt = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, samples: COARSE ? 2 : 4 });
+const composer = new EffectComposer(renderer, rt);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.75, 0.35, 0.32);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());   // tone mapping ACES + chuyển sRGB
+
+// ================================================================ LIGHTS + ARENA
+scene.add(new THREE.HemisphereLight(0x5a6cff, 0x120a24, 0.55));
+const sun = new THREE.DirectionalLight(0xc8d6ff, 1.5); sun.position.set(-8, 20, 10); scene.add(sun);
+const playerLight = new THREE.PointLight(0x41f3ff, 9, 7, 1.7); playerLight.position.set(0, 1.2, 0); scene.add(playerLight);
+const lightPool = [];
+for (let i = 0; i < LIGHT_POOL; i++) {
+  const l = new THREE.PointLight(0xffffff, 0, 12, 1.6); l.position.set(0, -50, 0); scene.add(l);
+  lightPool.push({ l, life: 0, max: 1, peak: 0 });
+}
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(800, 800),
+  new THREE.MeshStandardMaterial({ color: 0x0b0919, roughness: 0.5, metalness: 0.6 }));
+ground.rotation.x = -Math.PI / 2; scene.add(ground);
+const grid = new THREE.GridHelper(800, 400, 0x3a2a90, 0x22186a);
+grid.position.y = 0.012; grid.material.transparent = true; grid.material.opacity = 0.75; grid.material.depthWrite = false; scene.add(grid);
+const borderGeo = new THREE.BufferGeometry();
+borderGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
+const border = new THREE.LineLoop(borderGeo, new THREE.LineBasicMaterial({ color: new THREE.Color(0.25, 1.1, 1.7), transparent: true, opacity: 0.5 }));
+scene.add(border);
+
+// ================================================================ PLAYER + TRAIL
+const player = { x: 0, z: 0 }, target = { x: 0, z: 0 };
+const playerMesh = new THREE.Mesh(new THREE.SphereGeometry(PLAYER_R, 24, 16), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.6, 3.6, 4.0) }));
+playerMesh.position.y = PLAYER_Y; scene.add(playerMesh);
+const playerRing = new THREE.Mesh(new THREE.RingGeometry(0.52, 0.58, 48),
+  new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 1.4, 1.9), transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+playerRing.rotation.x = -Math.PI / 2; playerRing.position.y = 0.06; scene.add(playerRing);
+
+const hx = new Float32Array(TRAIL_N), hz = new Float32Array(TRAIL_N);
+const tPos = new Float32Array(TRAIL_N * 6), tCol = new Float32Array(TRAIL_N * 6);
+const tIdx = [];
+for (let i = 0; i < TRAIL_N - 1; i++) { const a = i * 2; tIdx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+const trailGeo = new THREE.BufferGeometry();
+trailGeo.setAttribute('position', new THREE.BufferAttribute(tPos, 3).setUsage(THREE.DynamicDrawUsage));
+trailGeo.setAttribute('color', new THREE.BufferAttribute(tCol, 3).setUsage(THREE.DynamicDrawUsage));
+trailGeo.setIndex(tIdx);
+const trail = new THREE.Mesh(trailGeo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+trail.frustumCulled = false; scene.add(trail);
+let trailAcc = 0, trailAlpha = 1;
+
+// ================================================================ ENEMIES (InstancedMesh, 4 hình khối)
+const TYPE_RGB = [0xff2f92, 0xa64dff, 0xff7a1a, 0xff3048].map((c) => new THREE.Color(c));
+const GEOS = [new THREE.TetrahedronGeometry(1.15), new THREE.OctahedronGeometry(1), new THREE.BoxGeometry(1.25, 1.25, 1.25), new THREE.IcosahedronGeometry(1, 0)];
+const enemyMeshes = GEOS.map((g, t) => {
+  const c = TYPE_RGB[t];
+  const m = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 1.3, roughness: 0.3, metalness: 0.25, flatShading: true }), ENEMY_CAP);
+  m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.count = 0; m.frustumCulled = false; scene.add(m);
+  return m;
+});
+const enemyArr = enemyMeshes.map((m) => m.instanceMatrix.array);
+const E = {
+  n: 0,
+  x: new Float32Array(ENEMY_CAP), z: new Float32Array(ENEMY_CAP), vx: new Float32Array(ENEMY_CAP), vz: new Float32Array(ENEMY_CAP),
+  a: new Float32Array(ENEMY_CAP), b: new Float32Array(ENEMY_CAP), sa: new Float32Array(ENEMY_CAP), sb: new Float32Array(ENEMY_CAP),
+  s: new Float32Array(ENEMY_CAP), spd: new Float32Array(ENEMY_CAP), ph: new Float32Array(ENEMY_CAP),
+  type: new Uint8Array(ENEMY_CAP), near: new Uint8Array(ENEMY_CAP), dead: new Uint8Array(ENEMY_CAP),
+};
+const E_ARRS = [E.x, E.z, E.vx, E.vz, E.a, E.b, E.sa, E.sb, E.s, E.spd, E.ph, E.type, E.near];
+
+// ================================================================ DEBRIS + FLASHES
+const D = {
+  n: 0,
+  x: new Float32Array(DEBRIS_CAP), y: new Float32Array(DEBRIS_CAP), z: new Float32Array(DEBRIS_CAP),
+  vx: new Float32Array(DEBRIS_CAP), vy: new Float32Array(DEBRIS_CAP), vz: new Float32Array(DEBRIS_CAP),
+  life: new Float32Array(DEBRIS_CAP), max: new Float32Array(DEBRIS_CAP), s: new Float32Array(DEBRIS_CAP),
+  a: new Float32Array(DEBRIS_CAP), b: new Float32Array(DEBRIS_CAP), sa: new Float32Array(DEBRIS_CAP), sb: new Float32Array(DEBRIS_CAP),
+};
+const D_ARRS = [D.x, D.y, D.z, D.vx, D.vy, D.vz, D.life, D.max, D.s, D.a, D.b, D.sa, D.sb];
+const debrisColor = new Float32Array(DEBRIS_CAP * 3);
+const debrisMesh = new THREE.InstancedMesh(new THREE.TetrahedronGeometry(1), new THREE.MeshBasicMaterial({ color: 0xffffff }), DEBRIS_CAP);
+debrisMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+debrisMesh.instanceColor = new THREE.InstancedBufferAttribute(debrisColor, 3).setUsage(THREE.DynamicDrawUsage);
+debrisMesh.count = 0; debrisMesh.frustumCulled = false; scene.add(debrisMesh);
+
+const F = { n: 0, x: new Float32Array(FLASH_CAP), z: new Float32Array(FLASH_CAP), t: new Float32Array(FLASH_CAP), max: new Float32Array(FLASH_CAP), s: new Float32Array(FLASH_CAP) };
+const flashColor = new Float32Array(FLASH_CAP * 3);
+const flashMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 12, 8),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false }), FLASH_CAP);
+flashMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+flashMesh.instanceColor = new THREE.InstancedBufferAttribute(flashColor, 3).setUsage(THREE.DynamicDrawUsage);
+flashMesh.count = 0; flashMesh.frustumCulled = false; scene.add(flashMesh);
+
+// ================================================================ SHOCKWAVE + ORBS
+const waveMat = () => new THREE.MeshBasicMaterial({ color: new THREE.Color(0.3, 1.5, 2.2), transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+const ring1 = new THREE.Mesh(new THREE.RingGeometry(0.93, 1, 128), waveMat());
+const ring2 = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 96), waveMat());
+for (const r of [ring1, ring2]) { r.rotation.x = -Math.PI / 2; r.position.y = 0.08; r.visible = false; scene.add(r); }
+const wave = { on: false, t: 0, x: 0, z: 0 };
+
+const orbGeo = new THREE.OctahedronGeometry(0.27);
+const orbMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.5, 2.9, 0.3) });
+const orbs = [];
+for (let i = 0; i < ORB_COUNT; i++) { const m = new THREE.Mesh(orbGeo, orbMat); m.visible = false; scene.add(m); orbs.push({ m, x: 0, z: 0, on: false, wait: 0.2 + i * 0.12, born: 0 }); }
+
+// ================================================================ STATE
+let state = 'menu';
+let simTime = 0, aliveTime = 0, level = 0, levelT = 0, spawnT = 1;
+let killPts = 0, closePts = 0, score = 0, combo = 0, lastKill = -9, nextBig = 12, energy = 0;
+let timeScale = 1, slowT = 0, shakeAmp = 0, deadAt = 0, lastCloseText = -9;
+let best = 0;
+try { best = parseInt(localStorage.getItem('neonSwarmBest') || '0', 10) || 0; } catch (e) { best = 0; }
+function saveBest() { try { localStorage.setItem('neonSwarmBest', String(best)); } catch (e) { /* không lưu được: bỏ qua */ } }
+const events = [], due = [];
+const bounds = { minX: -10, maxX: 10, minZ: -10, maxZ: 10 };
+const pointer = { cx: 0, cy: 0, off: 0, has: false };
+const stress = { t: 0, peak: 0, peakE: 0, peakD: 0, boomT: 0, capT: 0, times: [], head: 0 };
+
+function diff() {
+  const L = level;
+  return { interval: Math.max(0.55, 2.4 * Math.pow(0.84, L)), size: Math.min(28, 5 + 2 * L), speed: Math.min(9.5, 3.1 * Math.pow(1.11, L)), turn: 1.6 + 0.12 * L, cap: 260 + 90 * L };
+}
+let curDiff = diff();
+
+// ================================================================ SPATIAL GRID
+let gx0 = 0, gz0 = 0, gw = 1, gh = 1;
+let cellStart = new Int32Array(2), cellFill = new Int32Array(1);
+const cellItems = new Int32Array(ENEMY_CAP), cellOf = new Int32Array(ENEMY_CAP);
+function setupGrid() {
+  gx0 = bounds.minX - 60; gz0 = bounds.minZ - 60;
+  gw = Math.ceil((bounds.maxX - bounds.minX + 120) / CELL); gh = Math.ceil((bounds.maxZ - bounds.minZ + 120) / CELL);
+  cellStart = new Int32Array(gw * gh + 1); cellFill = new Int32Array(gw * gh);
+}
+function buildGrid() {
+  cellFill.fill(0);
+  for (let i = 0; i < E.n; i++) {
+    let cx = Math.floor((E.x[i] - gx0) / CELL), cz = Math.floor((E.z[i] - gz0) / CELL);
+    cx = cx < 0 ? 0 : cx >= gw ? gw - 1 : cx; cz = cz < 0 ? 0 : cz >= gh ? gh - 1 : cz;
+    const c = cz * gw + cx; cellOf[i] = c; cellFill[c]++;
+  }
+  cellStart[0] = 0;
+  for (let c = 0; c < gw * gh; c++) { cellStart[c + 1] = cellStart[c] + cellFill[c]; cellFill[c] = cellStart[c]; }
+  for (let i = 0; i < E.n; i++) cellItems[cellFill[cellOf[i]]++] = i;
+}
+function queryRadius(x, z, r, cb) {
+  const r2 = r * r;
+  const x0 = clamp(Math.floor((x - r - gx0) / CELL), 0, gw - 1), x1 = clamp(Math.floor((x + r - gx0) / CELL), 0, gw - 1);
+  const z0 = clamp(Math.floor((z - r - gz0) / CELL), 0, gh - 1), z1 = clamp(Math.floor((z + r - gz0) / CELL), 0, gh - 1);
+  for (let cz = z0; cz <= z1; cz++) for (let cx = x0; cx <= x1; cx++) {
+    const c = cz * gw + cx, end = cellStart[c + 1];
+    for (let k = cellStart[c]; k < end; k++) {
+      const j = cellItems[k]; if (E.dead[j]) continue;
+      const dx = E.x[j] - x, dz = E.z[j] - z;
+      if (dx * dx + dz * dz <= r2) cb(j);
+    }
+  }
+}
+
+// ================================================================ LAYOUT (xoay máy / gập-mở)
+let W = 1, H = 1;
+const raycaster = new THREE.Raycaster(), ndc = new THREE.Vector2();
+const playPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -PLAYER_Y);
+const tmpV = new THREE.Vector3();
+function screenToWorld(cx, cy, out) {
+  ndc.set((cx / W) * 2 - 1, -(cy / H) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  return raycaster.ray.intersectPlane(playPlane, out);
+}
+function layout() {
+  W = Math.max(1, window.innerWidth); H = Math.max(1, window.innerHeight);
+  renderer.setSize(W, H, false);
+  composer.setPixelRatio(PR); composer.setSize(W, H);
+  camera.aspect = W / H;
+  const tanH = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const dist = camera.aspect < 1 ? HALF_SHORT / (tanH * camera.aspect) : HALF_SHORT / tanH;
+  camBase.set(0, dist * Math.cos(TILT), dist * Math.sin(TILT));
+  camera.position.copy(camBase); camera.lookAt(0, 0, 0);
+  camera.near = dist * 0.2; camera.far = dist * 5; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+  scene.fog.density = 0.22 / dist;
+  const a = screenToWorld(16, 78, new THREE.Vector3()), b = screenToWorld(W - 16, 78, new THREE.Vector3());
+  const c = screenToWorld(16, H - 54, new THREE.Vector3()), d = screenToWorld(W - 16, H - 54, new THREE.Vector3());
+  bounds.minX = Math.max(a.x, c.x); bounds.maxX = Math.min(b.x, d.x);
+  bounds.minZ = Math.max(a.z, b.z); bounds.maxZ = Math.min(c.z, d.z);
+  const p = borderGeo.attributes.position.array, y = 0.03;
+  p.set([bounds.minX, y, bounds.minZ, bounds.maxX, y, bounds.minZ, bounds.maxX, y, bounds.maxZ, bounds.minX, y, bounds.maxZ]);
+  borderGeo.attributes.position.needsUpdate = true; borderGeo.computeBoundingSphere();
+  setupGrid();
+  player.x = clamp(player.x, bounds.minX, bounds.maxX); player.z = clamp(player.z, bounds.minZ, bounds.maxZ);
+  target.x = player.x; target.z = player.z;
+  for (const o of orbs) if (o.on && (o.x < bounds.minX || o.x > bounds.maxX || o.z < bounds.minZ || o.z > bounds.maxZ)) placeOrb(o);
+}
+let layoutQueued = false;
+function queueLayout() { if (layoutQueued) return; layoutQueued = true; requestAnimationFrame(() => { layoutQueued = false; layout(); }); }
+window.addEventListener('resize', queueLayout);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', queueLayout);
+if (screen.orientation) screen.orientation.addEventListener('change', queueLayout);
+new ResizeObserver(queueLayout).observe(document.documentElement);
+
+// ================================================================ INPUT
+function onPtr(e) {
+  pointer.cx = e.clientX; pointer.cy = e.clientY; pointer.has = true;
+  // ngón tay không che chấm sáng: đặt chấm cao hơn điểm chạm
+  pointer.off = e.pointerType === 'touch' ? clamp(H * 0.085, 56, 90) : 0;
+}
+window.addEventListener('pointermove', onPtr, { passive: true });
+window.addEventListener('pointerdown', onPtr, { passive: true });
+const block = (e) => e.preventDefault();
+document.addEventListener('touchstart', block, { passive: false });
+document.addEventListener('touchmove', block, { passive: false });
+document.addEventListener('gesturestart', block);
+document.addEventListener('dblclick', block);
+document.addEventListener('contextmenu', block);
+window.addEventListener('keydown', (e) => { if (e.code === 'Space' || e.code === 'Enter') overlayTap(null); });
+
+// ================================================================ AUDIO (Web Audio API)
+let actx = null, master = null, noiseBuf = null, lastBoom = 0;
+function initAudio() {
+  try {
+    if (!actx) {
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      const comp = actx.createDynamicsCompressor(); comp.threshold.value = -16; comp.ratio.value = 6;
+      master = actx.createGain(); master.gain.value = 0.55; master.connect(comp); comp.connect(actx.destination);
+      noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+      const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    if (actx.state === 'suspended') actx.resume();
+  } catch (e) { actx = null; }
+}
+function tone(type, f0, f1, dur, vol, when = 0) {
+  const t = actx.currentTime + when, o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.05);
+}
+function noise(dur, vol, type, f0, f1, q = 0.8, when = 0) {
+  const t = actx.currentTime + when, s = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
+  s.buffer = noiseBuf; fl.type = type; fl.Q.value = q;
+  fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(fl); fl.connect(g); g.connect(master); s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.05);
+}
+const ok = () => actx && actx.state === 'running';
+function sfxBoom(c) { // combo càng cao, tiếng nổ càng cao (mỗi combo +1 nửa cung, tối đa 3 quãng tám)
+  if (!ok()) return; const now = actx.currentTime; if (now - lastBoom < 0.028) return; lastBoom = now;
+  const k = Math.min(c, 36), f = 150 * Math.pow(2, k / 12);
+  tone('triangle', f * 2, f, 0.22, 0.2); tone('sine', f * 4, f * 2, 0.12, 0.06);
+  noise(0.28, 0.3, 'bandpass', 2400 + k * 120, 300, 0.7);
+}
+function sfxWave() { if (!ok()) return; tone('sine', 170, 36, 0.75, 0.6); tone('sawtooth', 90, 40, 0.5, 0.1); noise(0.65, 0.4, 'lowpass', 3200, 120, 0.5); }
+const PENTA = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24];
+function sfxPick(n) { if (!ok()) return; const f = 523 * Math.pow(2, PENTA[Math.min(n, 10)] / 12); tone('sine', f, f, 0.16, 0.18); tone('triangle', f * 2, f * 2, 0.08, 0.05); }
+function sfxClose() { if (!ok()) return; noise(0.18, 0.2, 'highpass', 1500, 6000, 0.6); tone('square', 1320, 1760, 0.08, 0.035); }
+function sfxDeath() { if (!ok()) return; tone('sawtooth', 220, 30, 0.9, 0.3); noise(1.0, 0.5, 'lowpass', 4000, 80, 0.4); }
+function sfxStart() { if (!ok()) return; [0, 4, 7, 12].forEach((n, i) => tone('triangle', 330 * Math.pow(2, n / 12), 330 * Math.pow(2, n / 12), 0.15, 0.12, i * 0.06)); }
+function sfxLevel() { if (!ok()) return; tone('square', 440, 880, 0.18, 0.05); }
+
+// ================================================================ HUD
+const scoreVal = $('scoreVal'), bestVal = $('bestVal'), perfEl = $('perf'), comboEl = $('combo'), bannerEl = $('banner');
+const overlay = $('overlay'), stressInfo = $('stressInfo'), energyEl = $('energy');
+for (let i = 0; i < ORBS_PER_WAVE; i++) energyEl.appendChild(document.createElement('i'));
+const pips = [...energyEl.children];
+function updateEnergyHud() { pips.forEach((p, i) => p.classList.toggle('on', i < energy)); }
+let shownScore = -1, shownBest = -1, shownCombo = -1;
+function updateHud() {
+  if (score !== shownScore) { shownScore = score; scoreVal.textContent = score.toLocaleString('en-US'); }
+  const b = Math.max(best, state === 'play' ? score : 0);
+  if (b !== shownBest) { shownBest = b; bestVal.textContent = 'Best ' + b.toLocaleString('en-US'); }
+  const c = state === 'play' && combo >= 2 ? combo : 0;
+  if (c !== shownCombo) {
+    if (c > shownCombo && c > 0) { comboEl.classList.remove('pop'); void comboEl.offsetWidth; comboEl.classList.add('pop'); }
+    shownCombo = c;
+    if (c > 0) { comboEl.textContent = 'Combo ' + c + '  ×' + comboMult().toFixed(1); const hue = (330 + c * 7) % 360; comboEl.style.textShadow = `0 0 10px hsl(${hue} 100% 60%),0 0 28px hsl(${hue} 100% 55%)`; }
+    comboEl.classList.toggle('show', c > 0);
+  }
+}
+function banner(text) { bannerEl.textContent = text; bannerEl.classList.remove('go'); void bannerEl.offsetWidth; bannerEl.classList.add('go'); }
+const floatPool = [];
+for (let i = 0; i < 10; i++) { const el = document.createElement('div'); el.className = 'float'; document.body.appendChild(el); floatPool.push(el); }
+let floatIdx = 0;
+function floatText(txt, wx, wz, cls) {
+  const v = tmpV.set(wx, 0.6, wz).project(camera);
+  const el = floatPool[floatIdx++ % floatPool.length];
+  el.textContent = txt; el.className = 'float ' + cls;
+  el.style.left = ((v.x + 1) / 2) * W + 'px'; el.style.top = ((1 - v.y) / 2) * H - 36 + 'px';
+  void el.offsetWidth; el.classList.add('go');
+}
+
+function showMenu() {
+  state = 'menu'; resetWorld(); stressInfo.style.display = 'none';
+  overlay.innerHTML = `<div class="title">Neon<br>Swarm</div>
+    <div class="hint">Move with one finger. Grab 10 orbs to fire a shockwave.</div>
+    <div class="tap">Tap to start</div>
+    <div class="ovBest">Best ${best.toLocaleString('en-US')}</div>
+    <button id="stressBtn" type="button">Stress test</button>`;
+  overlay.classList.remove('hidden');
+}
+function showGameOver(isNew) {
+  overlay.innerHTML = `<div class="title over">Game over</div>
+    <div class="ovScore">Score ${score.toLocaleString('en-US')}</div>
+    <div class="ovBest ${isNew ? 'newBest' : ''}">${isNew ? 'New best!' : 'Best ' + best.toLocaleString('en-US')}</div>
+    <div class="tap">Tap to play again</div>`;
+  overlay.classList.remove('hidden');
+}
+function overlayTap(e) {
+  if (e) onPtr(e);
+  if (e && e.target && e.target.closest && e.target.closest('#stressBtn')) { startStress(); return; }
+  if (state === 'menu') startGame();
+  else if (state === 'dead') { if (performance.now() - deadAt > 280) startGame(); }
+  else if (state === 'stressDone') showMenu();
+}
+overlay.addEventListener('pointerdown', overlayTap);
+
+// ================================================================ SPAWN / EFFECT HELPERS
+function addEnemy(x, z, vx, vz, type, spd) {
+  if (E.n >= ENEMY_CAP) return;
+  const i = E.n++;
+  E.x[i] = x; E.z[i] = z; E.vx[i] = vx; E.vz[i] = vz; E.type[i] = type; E.spd[i] = spd;
+  E.s[i] = ENEMY_R * rand(0.85, 1.18); E.a[i] = Math.random() * TAU; E.b[i] = Math.random() * TAU;
+  E.sa[i] = rand(-3, 3); E.sb[i] = rand(-3, 3); E.ph[i] = Math.random() * TAU; E.near[i] = 0; E.dead[i] = 0;
+}
+function edgePoint(m) {
+  const w = bounds.maxX - bounds.minX, h = bounds.maxZ - bounds.minZ;
+  let p = Math.random() * (2 * w + 2 * h);
+  if (p < w) return [bounds.minX + p, bounds.minZ - m]; p -= w;
+  if (p < w) return [bounds.minX + p, bounds.maxZ + m]; p -= w;
+  if (p < h) return [bounds.minX - m, bounds.minZ + p]; p -= h;
+  return [bounds.maxX + m, bounds.minZ + p];
+}
+function spawnSwarm(count, spd, type) {
+  const [cx, cz] = edgePoint(rand(2, 3.5));
+  const dx = player.x - cx, dz = player.z - cz, d = Math.hypot(dx, dz) || 1;
+  const spread = 0.8 + Math.sqrt(count) * 0.35;
+  for (let k = 0; k < count; k++) {
+    const r = spread * Math.sqrt(Math.random()), an = Math.random() * TAU;
+    addEnemy(cx + Math.cos(an) * r, cz + Math.sin(an) * r, (dx / d) * spd * 0.7, (dz / d) * spd * 0.7, type, spd * rand(0.9, 1.1));
+  }
+}
+function spawnDebris(x, y, z, count, r, g, b, spd, lifeMul = 1) {
+  for (let k = 0; k < count; k++) {
+    if (D.n >= DEBRIS_CAP) return;
+    const i = D.n++, an = Math.random() * TAU, sp = spd * (0.35 + Math.random() * 0.9);
+    D.x[i] = x; D.y[i] = y; D.z[i] = z;
+    D.vx[i] = Math.cos(an) * sp; D.vz[i] = Math.sin(an) * sp; D.vy[i] = rand(1.5, 6.5);
+    D.life[i] = D.max[i] = rand(0.55, 1.35) * lifeMul; D.s[i] = rand(0.05, 0.14);
+    D.a[i] = Math.random() * TAU; D.b[i] = Math.random() * TAU; D.sa[i] = rand(-14, 14); D.sb[i] = rand(-14, 14);
+    const hot = Math.random() < 0.12 ? 0.6 : 0, v = rand(1.1, 2.3), o = i * 3;
+    debrisColor[o] = r * v + hot; debrisColor[o + 1] = g * v + hot; debrisColor[o + 2] = b * v + hot;
+  }
+}
+function spawnFlash(x, z, size, r, g, b, dur) {
+  if (F.n >= FLASH_CAP) return;
+  const i = F.n++; F.x[i] = x; F.z[i] = z; F.t[i] = 0; F.max[i] = dur; F.s[i] = size;
+  flashColor[i * 3] = r; flashColor[i * 3 + 1] = g; flashColor[i * 3 + 2] = b;
+}
+function flashLight(x, z, color, peak, dur) { // vụ nổ phát sáng thật, chiếu lên sàn và các khối xung quanh
+  let pick = lightPool[0], lowest = Infinity;
+  for (const L of lightPool) { const v = L.life <= 0 ? -1 : L.l.intensity; if (v < lowest) { lowest = v; pick = L; } }
+  pick.l.position.set(x, 1.4, z); pick.l.color.copy(color); pick.peak = peak; pick.life = pick.max = dur; pick.l.intensity = peak;
+}
+const CYAN = new THREE.Color(0.25, 0.95, 1), WHITE = new THREE.Color(1, 1, 1), LIME = new THREE.Color(0.8, 1, 0.25);
+
+function explodeEnemy(i, depth) {
+  if (E.dead[i]) return;
+  E.dead[i] = 1;
+  const x = E.x[i], z = E.z[i], c = TYPE_RGB[E.type[i]], isStress = state === 'stress';
+  combo++; lastKill = simTime;
+  if (state === 'play') {
+    killPts += Math.round(10 * comboMult());   // điểm diệt × hệ số combo
+    if (combo >= nextBig) bigChain();
+  }
+  spawnDebris(x, ENEMY_Y, z, isStress ? 10 : 12 + Math.min(10, combo >> 2), c.r, c.g, c.b, rand(4, 8));
+  spawnFlash(x, z, 0.75 + Math.min(combo, 30) * 0.015, c.r * 0.9 + 0.25, c.g * 0.9 + 0.25, c.b * 0.9 + 0.25, 0.2);
+  if (!isStress || Math.random() < 0.1) flashLight(x, z, c, isStress ? 20 : 28, 0.35);
+  if (!isStress) sfxBoom(combo);
+  if (depth < (isStress ? 3 : 999)) events.push({ x, z, t: simTime + rand(0.06, 0.11), d: depth });
+}
+function comboMult() { return 1 + 0.1 * combo; }
+function bigChain() { // chuỗi lớn: rung màn hình + chậm lại một khoảnh khắc
+  slowT = 0.55; shakeAmp = Math.max(shakeAmp, Math.min(0.9, 0.35 + combo * 0.01));
+  nextBig = Math.ceil(nextBig * 1.7);
+  banner('Chain ×' + combo);
+}
+function triggerWave() {
+  wave.on = true; wave.t = 0; wave.x = player.x; wave.z = player.z;
+  ring1.visible = ring2.visible = true;
+  flashLight(player.x, player.z, CYAN, 150, 0.7);
+  spawnFlash(player.x, player.z, 1.8, 0.3, 1.1, 1.5, 0.3);
+  spawnDebris(player.x, PLAYER_Y, player.z, 60, 0.3, 1.4, 2.0, 11, 0.8);
+  shakeAmp = Math.max(shakeAmp, 0.3);
+  sfxWave();
+}
+function placeOrb(o) {
+  let x = 0, z = 0;
+  for (let tries = 0; tries < 24; tries++) {
+    x = rand(bounds.minX + 0.8, bounds.maxX - 0.8); z = rand(bounds.minZ + 0.8, bounds.maxZ - 0.8);
+    if (Math.hypot(x - player.x, z - player.z) < 3) continue;
+    let clash = false; for (const q of orbs) if (q !== o && q.on && Math.hypot(q.x - x, q.z - z) < 1.6) clash = true;
+    if (!clash) break;
+  }
+  o.x = x; o.z = z; o.on = true; o.born = simTime; o.m.visible = true;
+}
+function closeBonus() {
+  closePts += CLOSE_BONUS;
+  if (simTime - lastCloseText > 0.18) { lastCloseText = simTime; floatText('Close!', player.x, player.z, 'close'); sfxClose(); }
+}
+function killPlayer() {
+  state = 'dead'; deadAt = performance.now();
+  playerMesh.visible = false; playerRing.visible = false;
+  spawnDebris(player.x, PLAYER_Y, player.z, 160, 0.6, 2.2, 2.8, 9, 1.5);
+  spawnFlash(player.x, player.z, 2.0, 0.8, 1.3, 1.5, 0.35);
+  flashLight(player.x, player.z, WHITE, 200, 0.9);
+  shakeAmp = 1; slowT = 0.5; sfxDeath();
+  score = Math.floor(aliveTime * 10) + killPts + closePts;
+  const isNew = score > best;
+  if (isNew) { best = score; saveBest(); }
+  showGameOver(isNew);
+}
+
+// ================================================================ GAME FLOW
+function resetWorld() {
+  E.n = 0; D.n = 0; F.n = 0; events.length = 0;
+  wave.on = false; ring1.visible = ring2.visible = false;
+  combo = 0; nextBig = 12; energy = 0; killPts = 0; closePts = 0; score = 0; aliveTime = 0;
+  level = 0; levelT = 0; curDiff = diff(); spawnT = 1.2; slowT = 0; timeScale = 1;
+  for (const L of lightPool) { L.life = 0; L.l.intensity = 0; }
+  for (const o of orbs) { o.on = false; o.m.visible = false; o.wait = rand(0.05, 0.5); }
+  playerMesh.visible = playerRing.visible = true; trailAlpha = 1;
+  updateEnergyHud();
+}
+function snapPlayerToPointer() {
+  if (pointer.has && screenToWorld(pointer.cx, pointer.cy - pointer.off, tmpV)) {
+    player.x = clamp(tmpV.x, bounds.minX, bounds.maxX); player.z = clamp(tmpV.z, bounds.minZ, bounds.maxZ);
+  }
+  target.x = player.x; target.z = player.z; hx.fill(player.x); hz.fill(player.z);
+}
+function startGame() {
+  initAudio(); resetWorld(); snapPlayerToPointer();
+  state = 'play'; overlay.classList.add('hidden'); stressInfo.style.display = 'none';
+  sfxStart();
+}
+function startStress() {
+  initAudio(); resetWorld(); snapPlayerToPointer();
+  state = 'stress'; overlay.classList.add('hidden');
+  Object.assign(stress, { t: 0, peak: 0, peakE: 0, peakD: 0, boomT: 0.5, capT: 0, times: [], head: 0 });
+  stressInfo.style.display = 'block';
+}
+function endStress(capped, avg) {
+  state = 'stressDone'; stressInfo.style.display = 'none';
+  E.n = 0; D.n = 0; F.n = 0; events.length = 0;
+  overlay.innerHTML = `<div class="title over">Stress test</div>
+    <div class="res">Max objects<br><b>${stress.peak.toLocaleString('en-US')}${capped ? '+' : ''}</b><br>
+    Enemies ${stress.peakE.toLocaleString('en-US')} · Debris ${stress.peakD.toLocaleString('en-US')}<br>
+    Avg FPS (last 3 s) ${avg.toFixed(1)}${capped ? '<br>Buffer limit reached' : ''}</div>
+    <div class="tap">Tap to continue</div>`;
+  overlay.classList.remove('hidden');
+}
+
+// ================================================================ UPDATE
+function updatePlayer(dt) {
+  if (pointer.has && state !== 'dead' && screenToWorld(pointer.cx, pointer.cy - pointer.off, tmpV)) {
+    target.x = clamp(tmpV.x, bounds.minX, bounds.maxX); target.z = clamp(tmpV.z, bounds.minZ, bounds.maxZ);
+  }
+  if (state === 'dead') return;
+  const dx = target.x - player.x, dz = target.z - player.z, d = Math.hypot(dx, dz), step = PLAYER_SPEED * dt;
+  if (d > step) { player.x += (dx / d) * step; player.z += (dz / d) * step; } else { player.x = target.x; player.z = target.z; }
+}
+function updateEnemies(dt) {
+  const px = player.x, pz = player.z, turn = Math.min(1, curDiff.turn * dt), SEP = 0.9, SEP2 = SEP * SEP;
+  for (let i = 0; i < E.n; i++) {
+    if (E.dead[i]) continue;
+    let x = E.x[i], z = E.z[i];
+    let dx = px - x, dz = pz - z, dist = Math.sqrt(dx * dx + dz * dz) + 1e-5;
+    const ux = dx / dist, uz = dz / dist, wob = Math.sin(simTime * 2.3 + E.ph[i]) * 0.45, sp = E.spd[i];
+    let vx = E.vx[i] + ((ux - uz * wob) * sp - E.vx[i]) * turn;
+    let vz = E.vz[i] + ((uz + ux * wob) * sp - E.vz[i]) * turn;
+    // tách bầy (dùng lưới không gian, tối đa 12 lần kiểm tra)
+    const c = cellOf[i], ccx = c % gw, ccz = (c / gw) | 0;
+    let sx = 0, sz = 0, checks = 0;
+    for (let oz = -1; oz <= 1 && checks < 12; oz++) {
+      const zz = ccz + oz; if (zz < 0 || zz >= gh) continue;
+      for (let ox = -1; ox <= 1 && checks < 12; ox++) {
+        const xx = ccx + ox; if (xx < 0 || xx >= gw) continue;
+        const cc = zz * gw + xx, end = cellStart[cc + 1];
+        for (let k = cellStart[cc]; k < end && checks < 12; k++) {
+          const j = cellItems[k]; if (j === i) continue; checks++;
+          const ex = x - E.x[j], ez = z - E.z[j], d2 = ex * ex + ez * ez;
+          if (d2 < SEP2 && d2 > 1e-6) { const dd = Math.sqrt(d2), f = (SEP - dd) / dd; sx += ex * f; sz += ez * f; }
+        }
+      }
+    }
+    vx += sx * 14 * dt; vz += sz * 14 * dt;
+    const vm = Math.hypot(vx, vz), lim = sp * 1.35;
+    if (vm > lim) { vx *= lim / vm; vz *= lim / vm; }
+    x += vx * dt; z += vz * dt;
+    E.x[i] = x; E.z[i] = z; E.vx[i] = vx; E.vz[i] = vz;
+    E.a[i] += E.sa[i] * dt; E.b[i] += E.sb[i] * dt;
+    if (state === 'play') {
+      dx = px - x; dz = pz - z; dist = Math.sqrt(dx * dx + dz * dz);
+      const hitR = PLAYER_R + E.s[i] * 0.78, nearR = hitR + 0.85;
+      if (dist < hitR) killPlayer();
+      else if (dist < nearR) { if (!E.near[i]) E.near[i] = 1; }
+      else if (E.near[i] === 1) { E.near[i] = 2; closeBonus(); }   // lướt sát mà không chạm
+    }
+  }
+}
+function updateWave(dt) {
+  if (!wave.on) return;
+  wave.t += dt;
+  const k = Math.min(1, wave.t / WAVE_T), r = WAVE_R * (1 - Math.pow(1 - k, 3));
+  if (k < 1 || wave.t < WAVE_T + dt) queryRadius(wave.x, wave.z, r, (j) => explodeEnemy(j, 0));
+  ring1.position.x = ring2.position.x = wave.x; ring1.position.z = ring2.position.z = wave.z;
+  ring1.scale.setScalar(Math.max(0.01, r)); ring2.scale.setScalar(Math.max(0.01, r * 0.72));
+  const fade = Math.max(0, 1 - wave.t / (WAVE_T + 0.25));
+  ring1.material.opacity = fade; ring2.material.opacity = fade * 0.5;
+  if (wave.t > WAVE_T + 0.25) { wave.on = false; ring1.visible = ring2.visible = false; }
+}
+function processEvents() { // phản ứng dây chuyền: mỗi vụ nổ kích nổ địch trong bán kính CHAIN_R
+  due.length = 0;
+  for (let k = events.length - 1; k >= 0; k--) {
+    if (events[k].t <= simTime) { due.push(events[k]); events[k] = events[events.length - 1]; events.pop(); }
+  }
+  for (const ev of due) queryRadius(ev.x, ev.z, CHAIN_R, (j) => explodeEnemy(j, ev.d + 1));
+  if (combo > 0 && events.length === 0 && simTime - lastKill > 0.7) { combo = 0; nextBig = 12; }
+}
+function compactEnemies() {
+  let w = 0;
+  for (let r = 0; r < E.n; r++) {
+    if (E.dead[r]) continue;
+    if (w !== r) for (let a = 0; a < E_ARRS.length; a++) E_ARRS[a][w] = E_ARRS[a][r];
+    E.dead[w] = 0; w++;
+  }
+  E.n = w;
+}
+function updateOrbs(dt) {
+  for (const o of orbs) {
+    if (!o.on) { o.wait -= dt; if (o.wait <= 0) placeOrb(o); continue; }
+    const age = simTime - o.born, s = Math.min(1, age * 4);
+    o.m.position.set(o.x, 0.6 + Math.sin(simTime * 3 + o.x) * 0.12, o.z);
+    o.m.rotation.y += dt * 2.4; o.m.rotation.x = 0.4; o.m.scale.setScalar(s * (1 + Math.sin(simTime * 6 + o.z) * 0.08));
+    if (state === 'play' && Math.hypot(o.x - player.x, o.z - player.z) < 0.8) {
+      o.on = false; o.m.visible = false; o.wait = rand(0.4, 1.2);
+      energy++; sfxPick(energy);
+      spawnDebris(o.x, 0.6, o.z, 10, LIME.r, LIME.g, LIME.b, 3, 0.6);
+      if (energy >= ORBS_PER_WAVE) { energy = 0; triggerWave(); }   // đủ 10 viên → sóng nổ tự động
+      updateEnergyHud();
+    }
+  }
+}
+function updateDebris(dt) {
+  const arr = debrisMesh.instanceMatrix.array, damp = Math.max(0, 1 - 1.2 * dt), g = 18 * dt;
+  let i = 0;
+  while (i < D.n) {
+    const life = D.life[i] - dt;
+    if (life <= 0) { // xoá kiểu swap-remove
+      const l = --D.n;
+      if (i !== l) { for (let a = 0; a < D_ARRS.length; a++) D_ARRS[a][i] = D_ARRS[a][l]; const o = i * 3, q = l * 3; debrisColor[o] = debrisColor[q]; debrisColor[o + 1] = debrisColor[q + 1]; debrisColor[o + 2] = debrisColor[q + 2]; }
+      continue;
+    }
+    D.life[i] = life;
+    let vx = D.vx[i] * damp, vy = D.vy[i] - g, vz = D.vz[i] * damp, y = D.y[i] + vy * dt;
+    if (y < 0.04) { y = 0.04; vy *= -0.35; vx *= 0.75; vz *= 0.75; }
+    const x = D.x[i] + vx * dt, z = D.z[i] + vz * dt;
+    D.x[i] = x; D.y[i] = y; D.z[i] = z; D.vx[i] = vx; D.vy[i] = vy; D.vz[i] = vz;
+    const A = (D.a[i] += D.sa[i] * dt), B = (D.b[i] += D.sb[i] * dt);
+    const s = D.s[i] * Math.pow(life / D.max[i], 0.6);
+    const ca = Math.cos(A), sa = Math.sin(A), cb = Math.cos(B), sb = Math.sin(B), o = i * 16;
+    arr[o] = ca * s; arr[o + 1] = 0; arr[o + 2] = -sa * s; arr[o + 3] = 0;
+    arr[o + 4] = sa * sb * s; arr[o + 5] = cb * s; arr[o + 6] = ca * sb * s; arr[o + 7] = 0;
+    arr[o + 8] = sa * cb * s; arr[o + 9] = -sb * s; arr[o + 10] = ca * cb * s; arr[o + 11] = 0;
+    arr[o + 12] = x; arr[o + 13] = y; arr[o + 14] = z; arr[o + 15] = 1;
+    i++;
+  }
+  debrisMesh.count = D.n;
+  if (D.n > 0) {
+    const im = debrisMesh.instanceMatrix, ic = debrisMesh.instanceColor;
+    im.clearUpdateRanges(); im.addUpdateRange(0, D.n * 16); im.needsUpdate = true;
+    ic.clearUpdateRanges(); ic.addUpdateRange(0, D.n * 3); ic.needsUpdate = true;
+  }
+}
+function updateFlashes(dt) {
+  const arr = flashMesh.instanceMatrix.array;
+  let i = 0;
+  while (i < F.n) {
+    const t = F.t[i] + dt;
+    if (t >= F.max[i]) {
+      const l = --F.n;
+      if (i !== l) { F.x[i] = F.x[l]; F.z[i] = F.z[l]; F.t[i] = F.t[l]; F.max[i] = F.max[l]; F.s[i] = F.s[l]; flashColor[i * 3] = flashColor[l * 3]; flashColor[i * 3 + 1] = flashColor[l * 3 + 1]; flashColor[i * 3 + 2] = flashColor[l * 3 + 2]; }
+      continue;
+    }
+    F.t[i] = t;
+    const k = t / F.max[i], s = F.s[i] * (0.35 + k) * (1 - k) * 1.6, o = i * 16;
+    arr.fill(0, o, o + 16); arr[o] = s; arr[o + 5] = s; arr[o + 10] = s;
+    arr[o + 12] = F.x[i]; arr[o + 13] = ENEMY_Y; arr[o + 14] = F.z[i]; arr[o + 15] = 1;
+    i++;
+  }
+  flashMesh.count = F.n;
+  if (F.n > 0) {
+    const im = flashMesh.instanceMatrix, ic = flashMesh.instanceColor;
+    im.clearUpdateRanges(); im.addUpdateRange(0, F.n * 16); im.needsUpdate = true;
+    ic.clearUpdateRanges(); ic.addUpdateRange(0, F.n * 3); ic.needsUpdate = true;
+  }
+}
+function updateLights(dt) {
+  for (const L of lightPool) {
+    if (L.life <= 0) { L.l.intensity = 0; continue; }
+    L.life -= dt; const k = Math.max(0, L.life / L.max); L.l.intensity = L.peak * k * k;
+  }
+  playerLight.position.set(player.x, 1.2, player.z);
+  playerLight.intensity = state === 'dead' ? Math.max(0, playerLight.intensity - dt * 40) : 9;
+}
+const typeCounts = [0, 0, 0, 0];
+function writeEnemies() {
+  typeCounts[0] = typeCounts[1] = typeCounts[2] = typeCounts[3] = 0;
+  for (let i = 0; i < E.n; i++) {
+    const t = E.type[i], arr = enemyArr[t], o = typeCounts[t]++ * 16, s = E.s[i];
+    const ca = Math.cos(E.a[i]), sa = Math.sin(E.a[i]), cb = Math.cos(E.b[i]), sb = Math.sin(E.b[i]);
+    arr[o] = ca * s; arr[o + 1] = 0; arr[o + 2] = -sa * s; arr[o + 3] = 0;
+    arr[o + 4] = sa * sb * s; arr[o + 5] = cb * s; arr[o + 6] = ca * sb * s; arr[o + 7] = 0;
+    arr[o + 8] = sa * cb * s; arr[o + 9] = -sb * s; arr[o + 10] = ca * cb * s; arr[o + 11] = 0;
+    arr[o + 12] = E.x[i]; arr[o + 13] = ENEMY_Y + Math.sin(simTime * 3 + E.ph[i]) * 0.08; arr[o + 14] = E.z[i]; arr[o + 15] = 1;
+  }
+  for (let t = 0; t < 4; t++) {
+    const m = enemyMeshes[t]; m.count = typeCounts[t];
+    if (typeCounts[t] > 0) { const im = m.instanceMatrix; im.clearUpdateRanges(); im.addUpdateRange(0, typeCounts[t] * 16); im.needsUpdate = true; }
+  }
+}
+function updateTrail(dt) {
+  trailAcc += dt;
+  while (trailAcc >= 1 / 60) { trailAcc -= 1 / 60; hx.copyWithin(1, 0, TRAIL_N - 1); hz.copyWithin(1, 0, TRAIL_N - 1); }
+  hx[0] = player.x; hz[0] = player.z;
+  trailAlpha = state === 'dead' ? Math.max(0, trailAlpha - dt * 3) : 1;
+  let px = 0, pz = 1;
+  for (let i = 0; i < TRAIL_N; i++) {
+    const ia = i > 0 ? i - 1 : 0, ib = i < TRAIL_N - 1 ? i + 1 : TRAIL_N - 1;
+    const dx = hx[ia] - hx[ib], dz = hz[ia] - hz[ib], L = Math.hypot(dx, dz);
+    if (L > 1e-4) { px = -dz / L; pz = dx / L; }
+    const k = 1 - i / (TRAIL_N - 1), w = 0.27 * Math.pow(k, 0.8), o = i * 6;
+    tPos[o] = hx[i] + px * w; tPos[o + 1] = 0.45; tPos[o + 2] = hz[i] + pz * w;
+    tPos[o + 3] = hx[i] - px * w; tPos[o + 4] = 0.45; tPos[o + 5] = hz[i] - pz * w;
+    const br = Math.pow(k, 1.6) * trailAlpha;
+    tCol[o] = tCol[o + 3] = 0.35 * br; tCol[o + 1] = tCol[o + 4] = 1.2 * br; tCol[o + 2] = tCol[o + 5] = 1.9 * br;
+  }
+  trailGeo.attributes.position.needsUpdate = true; trailGeo.attributes.color.needsUpdate = true;
+}
+function updateStress(rdt, now) { // Stress test: không thể thua, tăng dần địch + mảnh vỡ tới khi FPS TB < 50 trong 3 giây
+  stress.t += rdt;
+  const tgt = Math.min(ENEMY_CAP, Math.floor(160 * Math.pow(1.14, stress.t)));
+  let deficit = tgt - E.n, budget = 1500;
+  while (deficit > 0 && budget > 0) { const sz = Math.min(deficit, 40); spawnSwarm(sz, 4.5, (Math.random() * 4) | 0); deficit -= sz; budget -= sz; }
+  stress.boomT -= rdt;
+  if (stress.boomT <= 0 && E.n > 0) { stress.boomT = 0.25; explodeEnemy((Math.random() * E.n) | 0, 0); }
+  let dd = Math.min(Math.min(DEBRIS_CAP, tgt * 4) - D.n, 4000);
+  while (dd > 0 && E.n > 0) { const j = (Math.random() * E.n) | 0, c = TYPE_RGB[E.type[j]], k = Math.min(dd, 24); spawnDebris(E.x[j], ENEMY_Y, E.z[j], k, c.r, c.g, c.b, 5); dd -= k; }
+  const T = stress.times; T.push(now);
+  while (T[stress.head] < now - 3000) stress.head++;
+  if (stress.head > 4000) { T.splice(0, stress.head); stress.head = 0; }
+  const avg = (T.length - stress.head) / Math.min(3, stress.t);
+  const objs = E.n + D.n;
+  if (objs > stress.peak) { stress.peak = objs; stress.peakE = E.n; stress.peakD = D.n; }
+  stressInfo.innerHTML = `Stress test<br>${objs.toLocaleString('en-US')} objects · ${avg.toFixed(0)} FPS`;
+  if (stress.t > 4 && avg < 50) endStress(false, avg);
+  else if (E.n >= ENEMY_CAP * 0.98 && D.n >= DEBRIS_CAP * 0.85) { stress.capT += rdt; if (stress.capT > 5) endStress(true, avg); }
+}
+function step(dt, rdt, now) {
+  updatePlayer(dt);
+  buildGrid();
+  updateEnemies(dt);
+  if (state === 'play') {
+    aliveTime += dt; levelT += dt;
+    if (levelT >= LEVEL_SECONDS) { levelT -= LEVEL_SECONDS; level++; curDiff = diff(); banner('Level ' + (level + 1)); sfxLevel(); }
+    spawnT -= dt;
+    if (spawnT <= 0) {
+      spawnT = curDiff.interval * rand(0.75, 1.25);
+      if (E.n < curDiff.cap) spawnSwarm(Math.round(curDiff.size * rand(0.75, 1.2)), curDiff.speed, (Math.random() * Math.min(4, 2 + level)) | 0);
+    }
+  }
+  if (state === 'stress') updateStress(rdt, now);
+  updateWave(dt);
+  processEvents();
+  compactEnemies();
+  updateOrbs(dt);
+  updateDebris(dt);
+  updateFlashes(dt);
+  updateLights(dt);
+  writeEnemies();
+  updateTrail(dt);
+  playerMesh.position.set(player.x, PLAYER_Y + Math.sin(simTime * 6) * 0.04, player.z);
+  playerRing.position.x = player.x; playerRing.position.z = player.z; playerRing.rotation.z += dt * 2;
+  if (state === 'play') score = Math.floor(aliveTime * 10) + killPts + closePts;
+  updateHud();
+}
+
+// ================================================================ MAIN LOOP
+let last = performance.now(), fpsFrames = 0, fpsT = 0, fps = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  let rdt = (now - last) / 1000; last = now;
+  if (rdt > 0.25) rdt = 0.25; if (rdt < 0) rdt = 0;
+  fpsFrames++; fpsT += rdt;
+  if (fpsT >= 0.5) { fps = fpsFrames / fpsT; fpsFrames = 0; fpsT = 0; perfEl.innerHTML = `FPS ${fps.toFixed(0)}<br>Obj ${(E.n + D.n).toLocaleString('en-US')}`; }
+  if (slowT > 0) slowT -= rdt;
+  timeScale = slowT > 0.2 ? 0.22 : slowT > 0 ? 0.22 + 0.78 * (1 - slowT / 0.2) : 1;
+  const dt = Math.min(rdt, 1 / 30) * timeScale;
+  simTime += dt;
+  camera.position.copy(camBase); camera.lookAt(0, 0, 0); camera.updateMatrixWorld();
+  step(dt, rdt, now);
+  if (shakeAmp > 0.003) {
+    const ox = (Math.random() - 0.5) * shakeAmp, oz = (Math.random() - 0.5) * shakeAmp;
+    camera.position.set(camBase.x + ox, camBase.y + (Math.random() - 0.5) * shakeAmp * 0.5, camBase.z + oz);
+    camera.lookAt(ox, 0, oz);
+    shakeAmp *= Math.exp(-7 * rdt);
+  } else shakeAmp = 0;
+  composer.render(rdt);
+}
+
+layout();
+showMenu();
+// móc kiểm thử tự động (chỉ bật khi URL có #test)
+if (location.hash === '#test') window.__ns = { spawnSwarm, triggerWave, addEnemy, explodeEnemy, get state() { return state; }, get combo() { return combo; }, get n() { return E.n; }, get d() { return D.n; }, player };
+requestAnimationFrame((t) => { last = t; frame(t); });
+</script>
+</body>
+</html>

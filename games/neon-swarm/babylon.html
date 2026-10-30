@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#06041a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Neon Swarm</title>
+<style>
+:root{
+  --void:#06041a; --ice:#9ff6ff; --mag:#ff2fd2; --vio:#7a5cff; --amb:#ffb12e; --lime:#c6ff3d;
+  --ink:#ece9ff; --dim:rgba(236,233,255,.58);
+  --font:"Avenir Next Condensed","Bahnschrift","DIN Condensed","sans-serif-condensed","Roboto Condensed","Arial Narrow",system-ui,sans-serif;
+  --st:env(safe-area-inset-top,0px); --sr:env(safe-area-inset-right,0px);
+  --sb:env(safe-area-inset-bottom,0px); --sl:env(safe-area-inset-left,0px);
+  color-scheme:dark;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--void);
+  overscroll-behavior:none;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-text-size-adjust:100%}
+body{position:fixed;inset:0;font-family:var(--font);font-stretch:condensed;color:var(--ink)}
+#c{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
+
+/* HUD */
+.hud{position:absolute;inset:0;pointer-events:none;
+  padding:calc(var(--st) + 14px) calc(var(--sr) + 18px) calc(var(--sb) + 12px) calc(var(--sl) + 18px)}
+.lvl{position:absolute;left:calc(var(--sl) + 18px);right:calc(var(--sr) + 18px);top:calc(var(--st) + 6px);height:2px;
+  background:rgba(122,92,255,.18);border-radius:2px;overflow:hidden;opacity:0;transition:opacity .3s}
+.lvl i{display:block;height:100%;width:0;background:var(--vio);box-shadow:0 0 8px var(--vio)}
+.lvl.flash i{background:#fff;box-shadow:0 0 14px #fff}
+.stat{position:absolute;top:calc(var(--st) + 16px);display:flex;flex-direction:column;gap:0;opacity:0;transition:opacity .25s}
+.stat.l{left:calc(var(--sl) + 18px)} .stat.r{right:calc(var(--sr) + 18px);align-items:flex-end}
+.stat span{font-size:13px;letter-spacing:.06em;color:var(--dim)}
+.stat b{font-size:30px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;text-shadow:0 0 12px rgba(159,246,255,.55)}
+.stat.r b{font-size:20px;color:var(--dim);text-shadow:none}
+.combo{position:absolute;left:50%;top:calc(var(--st) + 22px);transform:translateX(-50%);font-size:28px;font-weight:800;
+  color:#fff;white-space:nowrap;opacity:0;transition:opacity .35s;font-variant-numeric:tabular-nums;
+  text-shadow:0 0 6px var(--mag),0 0 18px var(--mag),0 0 36px var(--vio)}
+.combo.on{opacity:1;transition:opacity .05s}
+.combo.bump{animation:bump .18s ease-out}
+@keyframes bump{0%{transform:translateX(-50%) scale(1.35)}100%{transform:translateX(-50%) scale(1)}}
+.perf{position:absolute;left:calc(var(--sl) + 14px);bottom:calc(var(--sb) + 10px);font-size:12px;line-height:1.35;
+  color:var(--dim);font-family:system-ui,sans-serif;font-variant-numeric:tabular-nums;white-space:pre}
+.playing .stat,.playing .lvl{opacity:1}
+#pops{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.pop{position:absolute;left:0;top:0;white-space:nowrap;font-weight:800;font-size:22px;opacity:0;
+  transform:translate(-50%,-50%);text-shadow:0 0 6px currentColor,0 0 16px currentColor}
+.pop.on{animation:pop .95s ease-out forwards}
+.pop.big{font-size:34px}
+@keyframes pop{0%{opacity:0;transform:translate(-50%,-30%) scale(.6)}
+  14%{opacity:1;transform:translate(-50%,-60%) scale(1.12)}
+  100%{opacity:0;transform:translate(-50%,-170%) scale(1)}}
+
+/* Overlay */
+.ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;
+  padding:calc(var(--st) + 24px) calc(var(--sr) + 24px) calc(var(--sb) + 24px) calc(var(--sl) + 24px);
+  background:radial-gradient(ellipse at center,rgba(6,4,26,.25),rgba(6,4,26,.72));transition:opacity .2s}
+.ov.hide{opacity:0;pointer-events:none}
+.panel{display:flex;flex-direction:column;align-items:center;gap:14px;max-width:34ch}
+.panel[hidden]{display:none}
+.logo{margin:0 0 6px;font-size:clamp(64px,19vmin,168px);line-height:.84;font-weight:800;letter-spacing:.03em;
+  text-transform:uppercase;color:#fff;
+  text-shadow:0 0 4px #fff,0 0 14px var(--mag),0 0 34px var(--mag),0 0 74px var(--vio);
+  animation:flicker 1.4s steps(1,end) 1}
+@keyframes flicker{0%{opacity:.08}8%{opacity:1}12%{opacity:.25}18%{opacity:1}40%{opacity:.6}44%{opacity:1}100%{opacity:1}}
+h2{margin:0;font-size:44px;font-weight:800;color:#fff;text-shadow:0 0 6px var(--mag),0 0 22px var(--mag)}
+.big{font-size:clamp(56px,14vmin,96px);font-weight:800;line-height:1;font-variant-numeric:tabular-nums;
+  text-shadow:0 0 10px var(--ice),0 0 30px rgba(159,246,255,.5)}
+.tap{margin:4px 0 0;font-size:24px;font-weight:700;color:var(--ice);text-shadow:0 0 10px var(--ice);animation:breathe 1.6s ease-in-out infinite}
+@keyframes breathe{50%{opacity:.45}}
+.sub{margin:0;font-size:18px;color:var(--dim);font-variant-numeric:tabular-nums}
+.small{margin:0;font-size:13px;color:var(--dim);font-family:system-ui,sans-serif;line-height:1.4}
+.btn{margin-top:14px;font:inherit;font-size:18px;font-weight:700;letter-spacing:.04em;color:var(--amb);background:transparent;
+  border:1.5px solid var(--amb);border-radius:999px;padding:11px 26px;cursor:pointer;
+  box-shadow:0 0 14px rgba(255,177,46,.35),inset 0 0 10px rgba(255,177,46,.2);text-shadow:0 0 8px rgba(255,177,46,.7)}
+.btn:focus-visible{outline:2px solid #fff;outline-offset:4px}
+@media (prefers-reduced-motion:reduce){.logo,.tap{animation:none}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="pops"></div>
+<div class="hud" id="hud">
+  <div class="lvl" id="lvl"><i id="lvlFill"></i></div>
+  <div class="stat l"><span>Score</span><b id="score">0</b></div>
+  <div class="stat r"><span>Best</span><b id="best">0</b></div>
+  <div class="combo" id="combo"></div>
+  <div class="perf" id="perf">-- fps</div>
+</div>
+<div class="ov" id="ov">
+  <div class="panel" id="pTitle">
+    <h1 class="logo">Neon<br>Swarm</h1>
+    <p class="tap" id="tapMsg">Loading</p>
+    <p class="sub" id="tBest"></p>
+    <button class="btn" id="stressBtn" type="button" hidden>Stress test</button>
+  </div>
+  <div class="panel" id="pOver" hidden>
+    <h2>Game over</h2>
+    <div class="big" id="oScore">0</div>
+    <p class="sub" id="oBest"></p>
+    <p class="tap">Tap to play again</p>
+  </div>
+  <div class="panel" id="pStress" hidden>
+    <h2>Stress test</h2>
+    <div class="big" id="sPeak">0</div>
+    <p class="sub">objects at peak</p>
+    <p class="small" id="sDetail"></p>
+    <p class="tap">Tap to continue</p>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/babylonjs@9.33.1/babylon.js" onerror="window.__bjsFail=1"></script>
+<script>
+(function () {
+'use strict';
+const $ = (id) => document.getElementById(id);
+const canvas = $('c');
+const fail = (msg) => { $('tapMsg').textContent = msg; $('tapMsg').style.animation = 'none'; };
+if (!window.BABYLON || window.__bjsFail) { fail("Couldn't load Babylon.js 9.33.1. Check the connection and reload."); return; }
+const B = BABYLON, V3 = B.Vector3, C3 = B.Color3;
+
+// ---------- Engine / scene ----------
+let engine;
+try {
+  engine = new B.Engine(canvas, true, { stencil: true, powerPreference: 'high-performance', preserveDrawingBuffer: false }, false);
+} catch (e) { fail("WebGL isn't available on this device."); return; }
+const DPR = Math.min(window.devicePixelRatio || 1, 2);
+engine.setHardwareScalingLevel(1 / DPR);
+
+const scene = new B.Scene(engine);
+scene.clearColor = new B.Color4(6 / 255, 4 / 255, 26 / 255, 1);
+scene.fogMode = B.Scene.FOGMODE_EXP2; scene.fogDensity = 0.011; scene.fogColor = C3.FromHexString('#06041a');
+scene.skipPointerMovePicking = true; scene.skipPointerDownPicking = true; scene.skipPointerUpPicking = true;
+scene.skipFrustumClipping = true;
+
+const cam = new B.ArcRotateCamera('cam', -Math.PI / 2, 0.44, 31, V3.Zero(), scene);
+cam.fov = 0.62; cam.minZ = 1; cam.maxZ = 220;
+
+const hemi = new B.HemisphericLight('hemi', new V3(0, 1, 0), scene);
+hemi.intensity = 0.22; hemi.diffuse = new C3(0.45, 0.4, 0.95); hemi.groundColor = C3.Black(); hemi.specular = C3.Black();
+
+const COLS = ['#ff2fd2', '#7a5cff', '#ffb12e', '#9ff6ff', '#c6ff3d']; // magenta, violet, amber, ice, lime
+const COL3 = COLS.map((h) => C3.FromHexString(h));
+const MAXL = 6;
+
+function litMat(name, col, emis, diff) {
+  const m = new B.StandardMaterial(name, scene);
+  m.diffuseColor = col.scale(diff); m.emissiveColor = col.scale(emis);
+  m.specularColor = new C3(0.9, 0.9, 0.95); m.specularPower = 48; m.maxSimultaneousLights = MAXL;
+  return m;
+}
+function unlitMat(name, col, k) {
+  const m = new B.StandardMaterial(name, scene);
+  m.disableLighting = true; m.emissiveColor = col.scale(k); m.diffuseColor = C3.Black(); m.specularColor = C3.Black();
+  return m;
+}
+
+// ---------- Ground: procedural neon grid ----------
+const ground = B.MeshBuilder.CreateGround('ground', { width: 400, height: 400 }, scene);
+ground.isPickable = false;
+const gridTex = new B.DynamicTexture('grid', 256, scene, true);
+{
+  const g = gridTex.getContext();
+  g.fillStyle = '#000'; g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = '#3a2aa6'; g.lineWidth = 5; g.strokeRect(0, 0, 256, 256);
+  g.fillStyle = '#6a55ff';
+  [[0, 0], [256, 0], [0, 256], [256, 256]].forEach(([x, y]) => g.fillRect(x - 6, y - 6, 12, 12));
+  gridTex.update();
+}
+gridTex.wrapU = gridTex.wrapV = B.Texture.WRAP_ADDRESSMODE; gridTex.uScale = gridTex.vScale = 160; gridTex.anisotropicFilteringLevel = 8;
+const gMat = new B.StandardMaterial('gmat', scene);
+gMat.diffuseColor = new C3(0.05, 0.045, 0.11); gMat.specularColor = new C3(0.55, 0.5, 0.95); gMat.specularPower = 22;
+gMat.emissiveTexture = gridTex; gMat.emissiveTexture.level = 0.55; gMat.maxSimultaneousLights = MAXL;
+ground.material = gMat;
+
+// ---------- Glow & post-processing (built-in) ----------
+const glow = new B.GlowLayer('glow', scene, { mainTextureRatio: 0.5, blurKernelSize: 26 });
+glow.intensity = 0.9; glow.addExcludedMesh(ground);
+// Saturated halo colour per mesh, independent of the lit surface colour (keeps cores crisp and halos pure)
+glow.customEmissiveColorSelector = (mesh, subMesh, material, result) => {
+  const g = mesh.metadata && mesh.metadata.glow;
+  if (g) result.set(g.r * 0.8, g.g * 0.8, g.b * 0.8, 1);
+  else { const e = material.emissiveColor || C3.Black(); result.set(e.r, e.g, e.b, 1); }
+};
+
+const pipe = new B.DefaultRenderingPipeline('pp', true, scene, [cam]);
+pipe.samples = engine.webGLVersion > 1 ? 4 : 1;
+pipe.bloomEnabled = true; pipe.bloomThreshold = 0.6; pipe.bloomWeight = 0.42; pipe.bloomKernel = 40; pipe.bloomScale = 0.5;
+pipe.imageProcessingEnabled = true;
+pipe.imageProcessing.contrast = 1.25; pipe.imageProcessing.exposure = 1.05;
+pipe.imageProcessing.vignetteEnabled = true; pipe.imageProcessing.vignetteWeight = 2.6;
+pipe.imageProcessing.vignetteColor = new B.Color4(0.02, 0, 0.08, 0);
+pipe.chromaticAberrationEnabled = true; pipe.chromaticAberration.aberrationAmount = 0; pipe.chromaticAberration.radialIntensity = 1.2;
+pipe.grainEnabled = true; pipe.grain.intensity = 6; pipe.grain.animated = true;
+
+// ---------- Thin-instance pools (1 draw call per shape/color) ----------
+class Pool {
+  constructor(mesh, cap) {
+    this.mesh = mesh; this.cap = cap; this.n = 0; this.buf = new Float32Array(cap * 16);
+    mesh.thinInstanceSetBuffer('matrix', this.buf, 16, false);
+    mesh.alwaysSelectAsActiveMesh = true; mesh.doNotSyncBoundingInfo = true; mesh.isPickable = false;
+    mesh.thinInstanceCount = 0; mesh.isVisible = false;
+  }
+  grow() {
+    const c = this.cap * 2, nb = new Float32Array(c * 16); nb.set(this.buf);
+    this.buf = nb; this.cap = c; this.mesh.thinInstanceSetBuffer('matrix', nb, 16, false);
+  }
+  push(x, y, z, a, b, s) {
+    if (this.n >= this.cap) this.grow();
+    const o = this.n++ * 16, m = this.buf;
+    const ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(b), sb = Math.sin(b);
+    m[o] = ca * s; m[o + 1] = 0; m[o + 2] = -sa * s; m[o + 3] = 0;
+    m[o + 4] = sb * sa * s; m[o + 5] = cb * s; m[o + 6] = sb * ca * s; m[o + 7] = 0;
+    m[o + 8] = cb * sa * s; m[o + 9] = -sb * s; m[o + 10] = cb * ca * s; m[o + 11] = 0;
+    m[o + 12] = x; m[o + 13] = y; m[o + 14] = z; m[o + 15] = 1;
+  }
+  commit() {
+    this.mesh.thinInstanceCount = this.n;
+    if (this.n > 0) this.mesh.thinInstanceBufferUpdated('matrix');
+    this.mesh.isVisible = this.n > 0;
+  }
+}
+
+// Enemy types: dart (tetra), cube, octa
+const ETYPES = [
+  { r: 0.42, speed: 5.6, accel: 3.0, col: 0, mesh: B.MeshBuilder.CreatePolyhedron('dart', { type: 0, size: 0.52 }, scene) },
+  { r: 0.5, speed: 4.3, accel: 2.4, col: 1, mesh: B.MeshBuilder.CreateBox('cube', { size: 0.8 }, scene) },
+  { r: 0.6, speed: 3.4, accel: 1.8, col: 2, mesh: B.MeshBuilder.CreatePolyhedron('octa', { type: 1, size: 0.72 }, scene) },
+];
+const ePools = ETYPES.map((t, i) => { t.mesh.material = litMat('em' + i, COL3[t.col], 0.5, 0.5); t.mesh.material.specularColor.set(0.5, 0.5, 0.55);
+  t.mesh.metadata = { glow: COL3[t.col] }; return new Pool(t.mesh, 256); });
+const dPools = COL3.map((c, i) => {
+  const m = B.MeshBuilder.CreatePolyhedron('deb' + i, { type: 0, size: 1 }, scene);
+  m.material = litMat('dm' + i, c, 0.75, 0.3); m.metadata = { glow: c }; return new Pool(m, 512);
+});
+
+// ---------- Structure-of-arrays storage ----------
+function soa(fields, cap) { const o = { cap, n: 0, fields }; for (const [k, T] of fields) o[k] = new T(cap); return o; }
+function soaGrow(o) { const c = o.cap * 2; for (const [k, T] of o.fields) { const a = new T(c); a.set(o[k]); o[k] = a; } o.cap = c; }
+function soaCopy(o, i, j) { for (const f of o.fields) o[f[0]][i] = o[f[0]][j]; }
+const F = Float32Array, U = Uint8Array;
+const E = soa([['x', F], ['z', F], ['vx', F], ['vz', F], ['a', F], ['b', F], ['sa', F], ['sb', F], ['bias', F], ['age', F],
+  ['orb', F], ['ph', F], ['spd', F], ['type', U], ['near', U], ['dead', U]], 512);
+const D = soa([['x', F], ['y', F], ['z', F], ['vx', F], ['vy', F], ['vz', F], ['a', F], ['b', F], ['sa', F], ['sb', F],
+  ['life', F], ['max', F], ['size', F], ['col', U]], 2048);
+
+// ---------- Spatial grid ----------
+const GC = 2.5, GN = 96, GH = GN * GC / 2;
+const head = new Int32Array(GN * GN);
+let nxt = new Int32Array(E.cap);
+const cellX = (x) => { const c = ((x + GH) / GC) | 0; return c < 0 ? 0 : c >= GN ? GN - 1 : c; };
+function buildGrid() {
+  head.fill(-1);
+  if (nxt.length < E.cap) nxt = new Int32Array(E.cap);
+  for (let i = 0; i < E.n; i++) {
+    if (E.dead[i]) continue;
+    const c = cellX(E.z[i]) * GN + cellX(E.x[i]); nxt[i] = head[c]; head[c] = i;
+  }
+}
+function query(x, z, r, fn) {
+  const x0 = cellX(x - r), x1 = cellX(x + r), z0 = cellX(z - r), z1 = cellX(z + r);
+  for (let cz = z0; cz <= z1; cz++) for (let cx = x0; cx <= x1; cx++)
+    for (let j = head[cz * GN + cx]; j >= 0; j = nxt[j]) fn(j);
+}
+
+// ---------- Player, trail, charge ring ----------
+const player = B.MeshBuilder.CreateSphere('player', { diameter: 0.56, segments: 16 }, scene);
+player.material = unlitMat('pm', new C3(0.85, 1, 1), 1.15); player.position.y = 0.5; player.isPickable = false;
+const trail = new B.TrailMesh('trail', player, scene, { diameter: 0.22, length: 30, segments: 30, sections: 4, autoStart: true });
+const trailMat = unlitMat('tm', COL3[3], 0.75); trailMat.alpha = 0.7; trail.material = trailMat; trail.isPickable = false;
+const pLight = new B.PointLight('pl', new V3(0, 1.2, 0), scene);
+pLight.diffuse = COL3[3]; pLight.specular = COL3[3].scale(0.6); pLight.intensity = 0.9; pLight.range = 7;
+
+const ringNode = new B.TransformNode('ring', scene);
+const dotOn = unlitMat('dOn', COL3[4], 1.3), dotOff = unlitMat('dOff', new C3(0.2, 0.22, 0.45), 0.6);
+const dots = [];
+for (let k = 0; k < 10; k++) {
+  const d = B.MeshBuilder.CreateSphere('dot' + k, { diameter: 0.15, segments: 6 }, scene);
+  const a = k / 10 * Math.PI * 2; d.position.set(Math.cos(a) * 0.86, 0, Math.sin(a) * 0.86);
+  d.parent = ringNode; d.material = dotOff; d.isPickable = false; dots.push(d);
+}
+
+// ---------- Orbs ----------
+const orbSrc = B.MeshBuilder.CreateSphere('orb', { diameter: 0.5, segments: 6 }, scene);
+orbSrc.material = unlitMat('om', COL3[4], 1.05); orbSrc.isVisible = false; orbSrc.isPickable = false;
+const orbs = [];
+for (let k = 0; k < 8; k++) {
+  const m = orbSrc.createInstance('o' + k); m.isPickable = false; m.setEnabled(false);
+  orbs.push({ m, x: 0, z: 0, on: false, ph: Math.random() * 6, wait: 0 });
+}
+
+// ---------- FX pools: flashes, shock rings, explosion lights ----------
+const flashes = [];
+for (let k = 0; k < 12; k++) {
+  const m = B.MeshBuilder.CreateSphere('fl' + k, { diameter: 1, segments: 10 }, scene);
+  const mat = unlitMat('flm' + k, C3.White(), 1); mat.alpha = 0; m.material = mat; m.isPickable = false; m.setEnabled(false);
+  flashes.push({ m, mat, t: 0, dur: 1, s: 1, col: C3.White(), on: false });
+}
+const rings = [];
+for (let k = 0; k < 3; k++) {
+  const m = B.MeshBuilder.CreateTorus('rg' + k, { diameter: 2, thickness: 0.028, tessellation: 96 }, scene);
+  const mat = unlitMat('rgm' + k, COL3[3], 1.1); mat.alpha = 0; m.material = mat; m.isPickable = false; m.setEnabled(false);
+  m.position.y = 0.35; rings.push({ m, mat });
+}
+let ringIdx = 0;
+const lights = [];
+for (let k = 0; k < 4; k++) {
+  const l = new B.PointLight('xl' + k, new V3(0, 1.6, 0), scene);
+  l.intensity = 0; l.range = 12; lights.push({ l, v: 0 });
+}
+
+// ---------- Audio (Web Audio API, all synthesized) ----------
+const AU = { ctx: null, out: null, noise: null, lastBoom: 0, lastClose: 0 };
+function audioInit() {
+  if (AU.ctx) { if (AU.ctx.state === 'suspended') AU.ctx.resume(); return; }
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    const ctx = new AC(), comp = ctx.createDynamicsCompressor(), g = ctx.createGain();
+    comp.threshold.value = -16; comp.knee.value = 10; comp.ratio.value = 6; comp.attack.value = 0.003; comp.release.value = 0.2;
+    g.gain.value = 0.55; g.connect(comp); comp.connect(ctx.destination);
+    const nb = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), d = nb.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    AU.ctx = ctx; AU.out = g; AU.noise = nb;
+  } catch (e) { AU.ctx = null; }
+}
+const sound = () => AU.ctx && AU.ctx.state === 'running' && (state === 'play' || state === 'dead');
+function env(g, t, peak, dur) {
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + 0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.006 + dur);
+}
+function tone(type, f0, f1, t, dur, vol) {
+  const o = AU.ctx.createOscillator(), g = AU.ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t);
+  if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+  env(g, t, vol, dur); o.connect(g); g.connect(AU.out); o.start(t); o.stop(t + dur + 0.05);
+}
+function noise(t, dur, vol, type, f0, f1, q) {
+  const s = AU.ctx.createBufferSource(), f = AU.ctx.createBiquadFilter(), g = AU.ctx.createGain();
+  s.buffer = AU.noise; f.type = type; f.Q.value = q; f.frequency.setValueAtTime(f0, t);
+  if (f1 !== f0) f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  env(g, t, vol, dur); s.connect(f); f.connect(g); g.connect(AU.out); s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.05);
+}
+function sfxBoom(combo) { // pitch climbs one semitone per combo step
+  if (!sound()) return; const t = AU.ctx.currentTime; if (t - AU.lastBoom < 0.028) return; AU.lastBoom = t;
+  const f = 110 * Math.pow(2, Math.min(combo - 1, 36) / 12);
+  tone('triangle', f * 2.2, f * 0.55, t, 0.2, 0.3); tone('sine', f * 4.4, f * 2, t, 0.09, 0.11);
+  noise(t, 0.22, 0.38, 'bandpass', f * 8, f * 2, 0.9);
+}
+const SCALE = [0, 2, 4, 5, 7, 9, 11, 12, 14, 16];
+function sfxPick(n) { if (!sound()) return; const t = AU.ctx.currentTime, f = 523 * Math.pow(2, SCALE[n - 1] / 12);
+  tone('sine', f, f * 1.01, t, 0.12, 0.2); tone('triangle', f * 2, f * 2, t, 0.06, 0.05); }
+function sfxWave() { if (!sound()) return; const t = AU.ctx.currentTime;
+  tone('sine', 95, 30, t, 0.8, 0.8); noise(t, 0.7, 0.5, 'lowpass', 2400, 120, 0.7); tone('sawtooth', 300, 1500, t, 0.35, 0.05); }
+function sfxClose() { if (!sound()) return; const t = AU.ctx.currentTime; if (t - AU.lastClose < 0.15) return; AU.lastClose = t;
+  noise(t, 0.16, 0.25, 'bandpass', 900, 3800, 2); tone('sine', 1320, 1760, t, 0.08, 0.07); }
+function sfxDeath() { if (!AU.ctx || AU.ctx.state !== 'running') return; const t = AU.ctx.currentTime;
+  tone('sawtooth', 260, 32, t, 1.1, 0.3); noise(t, 0.9, 0.6, 'lowpass', 3000, 80, 0.6); tone('sine', 60, 30, t, 0.9, 0.6); }
+function sfxBig() { if (!sound()) return; const t = AU.ctx.currentTime;
+  tone('sine', 880, 880, t, 0.9, 0.11); tone('sine', 1320, 1320, t + 0.04, 0.9, 0.09); tone('sine', 1760, 1760, t + 0.08, 1, 0.07); }
+function sfxLevel() { if (!sound()) return; const t = AU.ctx.currentTime;
+  tone('square', 220, 220, t, 0.12, 0.04); tone('square', 330, 330, t + 0.1, 0.16, 0.04); }
+const buzz = (ms) => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+
+// ---------- Screen → ground mapping & play bounds ----------
+const ray = new B.Ray(V3.Zero(), new V3(0, -1, 0), 1);
+function toGround(px, py) {
+  scene.createPickingRayToRef(px, py, B.Matrix.IdentityReadOnly, ray, cam);
+  if (ray.direction.y > -1e-4) return null;
+  const t = -ray.origin.y / ray.direction.y;
+  return { x: ray.origin.x + ray.direction.x * t, z: ray.origin.z + ray.direction.z * t };
+}
+const BD = { zN: -12, zF: 12, hN: 10, hF: 14, pzMin: -11, pzMax: 10 };
+function halfAt(z) { const k = Math.min(1, Math.max(0, (z - BD.zN) / (BD.zF - BD.zN))); return BD.hN + (BD.hF - BD.hN) * k; }
+function computeBounds() {
+  const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
+  cam.target.set(0, 0, 0); cam.getViewMatrix(true); cam.getProjectionMatrix(true);
+  const tl = toGround(0, 0), tr = toGround(w, 0), bl = toGround(0, h), br = toGround(w, h);
+  if (!tl || !tr || !bl || !br) return;
+  BD.zF = Math.min(tl.z, tr.z); BD.zN = Math.max(bl.z, br.z);
+  BD.hF = Math.min(Math.abs(tl.x), Math.abs(tr.x)); BD.hN = Math.min(Math.abs(bl.x), Math.abs(br.x));
+  // keep the player clear of the score row at the top and the screen edge at the bottom
+  const top = toGround(w / 2, Math.min(h * 0.3, 96)), bot = toGround(w / 2, h - 24);
+  if (top && bot) { BD.pzMax = top.z; BD.pzMin = bot.z; }
+}
+function onResize() {
+  engine.resize();
+  const portrait = canvas.clientWidth < canvas.clientHeight;
+  cam.fovMode = portrait ? B.Camera.FOVMODE_HORIZONTAL_FIXED : B.Camera.FOVMODE_VERTICAL_FIXED;
+  cam.beta = portrait ? 0.36 : 0.46;
+  computeBounds(); clampPlayer();
+}
+window.addEventListener('resize', onResize);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', onResize);
+if (window.ResizeObserver) new ResizeObserver(onResize).observe(document.body);
+
+// ---------- Game state ----------
+let state = 'boot';            // boot | title | play | dead | stress | stressDone
+let px = 0, pz = 0, tx = 0, tz = 0;
+let t = 0, score = 0, level = 0, charge = 0, combo = 0, comboT = 0, nextBig = 8, kills = 0;
+let spawnT = 0, ts = 1, slowT = 0, shake = 0, aberr = 0, deadAt = 0, simT = 0, attractT = 0;
+let closeAcc = 0, closeT = 0, lastKX = 0, lastKZ = 0, bigN = 0;
+let best = 0;
+try { best = parseInt(localStorage.getItem('neonSwarmBest') || '0', 10) || 0; } catch (e) { best = 0; }
+const saveBest = () => { try { localStorage.setItem('neonSwarmBest', String(best)); } catch (e) {} };
+const waves = [], blasts = [];
+const REDUCED = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const DEBRIS_CAP = 3000, CHAIN_R = 1.7, TOUCH_OFF = 56;
+
+function clampPlayer() {
+  const zMin = BD.pzMin, zMax = BD.pzMax;
+  if (pz < zMin) pz = zMin; if (pz > zMax) pz = zMax;
+  const h = halfAt(pz) - 0.6; if (px < -h) px = -h; if (px > h) px = h;
+}
+
+// ---------- Spawning ----------
+function addEnemy(ty, x, z, bias, orbR, mul) {
+  if (E.n >= E.cap) soaGrow(E);
+  const i = E.n++, P = ETYPES[ty];
+  E.x[i] = x; E.z[i] = z; E.vx[i] = 0; E.vz[i] = 0;
+  E.a[i] = Math.random() * 6.28; E.b[i] = Math.random() * 6.28;
+  E.sa[i] = (Math.random() * 2 - 1) * 3; E.sb[i] = (Math.random() * 2 - 1) * 3;
+  E.bias[i] = bias; E.age[i] = 0; E.orb[i] = orbR; E.ph[i] = Math.random() * 6.28;
+  E.spd[i] = P.speed * mul * (0.9 + Math.random() * 0.2);
+  E.type[i] = ty; E.near[i] = 0; E.dead[i] = 0;
+}
+function edgePoint() {
+  const m = 2.5;
+  for (let k = 0; k < 8; k++) {
+    const r = Math.random(); let x, z;
+    if (r < 0.4) { x = (Math.random() * 2 - 1) * BD.hF; z = BD.zF + m; }
+    else if (r < 0.6) { x = (Math.random() * 2 - 1) * BD.hN; z = BD.zN - m; }
+    else { z = BD.zN + Math.random() * (BD.zF - BD.zN); x = (r < 0.8 ? -1 : 1) * (halfAt(z) + m); }
+    if (Math.hypot(x - px, z - pz) > 9 || k === 7) return { x, z };
+  }
+}
+function spawnSwarm() {
+  const L = level, w = L === 0 ? [0.25, 0.75, 0] : L === 1 ? [0.4, 0.5, 0.1] : [0.36, 0.34, 0.3];
+  const r = Math.random(), ty = r < w[0] ? 0 : r < w[0] + w[1] ? 1 : 2;
+  const target = Math.min(12 + 8 * L, 220);
+  let size = Math.round((4 + 1.6 * L) * (0.7 + Math.random() * 0.6));
+  size = Math.max(3, Math.min(size, target - E.n + 3));
+  const c = edgePoint(), bias = (Math.random() * 2 - 1) * 0.9, mul = Math.min(2.3, 1 + 0.11 * L);
+  for (let k = 0; k < size; k++) {
+    const a = Math.random() * 6.28, d = Math.sqrt(Math.random()) * (1.2 + size * 0.08);
+    addEnemy(ty, c.x + Math.cos(a) * d, c.z + Math.sin(a) * d, bias + (Math.random() - 0.5) * 0.2, 0, mul);
+  }
+}
+function spawnOrbitEnemy(cx, cz, rMax) {
+  const a = Math.random() * 6.28, d = 3 + Math.random() * rMax;
+  addEnemy((Math.random() * 3) | 0, cx + Math.cos(a) * d, cz + Math.sin(a) * d,
+    (Math.random() < 0.5 ? -1 : 1) * (0.25 + Math.random() * 0.5), 1 + Math.random() * rMax, 0.8);
+}
+function placeOrb(o) {
+  for (let k = 0; k < 12; k++) {
+    const z = BD.zN + 1.5 + Math.random() * (BD.zF - BD.zN - 4), h = halfAt(z) - 1.2;
+    const x = (Math.random() * 2 - 1) * h;
+    if (Math.hypot(x - px, z - pz) < 6) continue;
+    if (orbs.some((q) => q !== o && q.on && Math.hypot(q.x - x, q.z - z) < 2)) continue;
+    o.x = x; o.z = z; break;
+  }
+  o.on = true; o.m.setEnabled(true);
+}
+
+// ---------- FX ----------
+function spawnDebris(x, y, z, col, count, power, lifeMul) {
+  for (let k = 0; k < count; k++) {
+    if (state !== 'stress' && D.n >= DEBRIS_CAP) return;
+    if (D.n >= D.cap) soaGrow(D);
+    const i = D.n++, a = Math.random() * 6.283, sp = (2 + Math.random() * 7) * power;
+    D.x[i] = x; D.y[i] = y; D.z[i] = z;
+    D.vx[i] = Math.cos(a) * sp; D.vz[i] = Math.sin(a) * sp; D.vy[i] = (1.5 + Math.random() * 6) * power * 0.8;
+    D.a[i] = Math.random() * 6.28; D.b[i] = Math.random() * 6.28;
+    D.sa[i] = (Math.random() * 2 - 1) * 12; D.sb[i] = (Math.random() * 2 - 1) * 12;
+    D.life[i] = D.max[i] = (0.55 + Math.random() * 0.7) * lifeMul; D.size[i] = 0.1 + Math.random() * 0.22; D.col[i] = col;
+  }
+}
+function spawnFlash(x, y, z, col, size, dur) {
+  let f = flashes.find((q) => !q.on); if (!f) f = flashes.reduce((a, b) => (a.t / a.dur > b.t / b.dur ? a : b));
+  f.on = true; f.t = 0; f.dur = dur; f.s = size; f.m.position.set(x, y, z); f.mat.emissiveColor.copyFrom(COL3[col]).scaleInPlace(1.6);
+  f.m.setEnabled(true);
+}
+function spawnLight(x, z, col, v, range) {
+  let L = lights[0]; for (const q of lights) if (q.v < L.v) L = q;
+  L.v = Math.max(L.v * 0.5, v); L.l.position.set(x, 1.6, z); L.l.range = range;
+  L.l.diffuse.copyFrom(COL3[col]); L.l.specular.copyFrom(COL3[col]);
+}
+function boom(x, z, col, power, lifeMul) {
+  spawnDebris(x, 0.6, z, col, (10 + Math.random() * 8 * power) | 0, power, lifeMul || 1);
+  spawnFlash(x, 0.6, z, col, 1.6 * power, 0.2);
+  spawnLight(x, z, col, 1.6 + power, 9 + power * 3);
+}
+const popEls = []; let popIdx = 0;
+for (let k = 0; k < 16; k++) { const d = document.createElement('div'); d.className = 'pop'; $('pops').appendChild(d); popEls.push(d); }
+const tmpV = new V3();
+function popup(x, z, text, color, big) {
+  const m = scene.getTransformMatrix(); tmpV.set(x, 0.8, z);
+  const v = V3.TransformCoordinates(tmpV, m);
+  const el = popEls[popIdx++ % popEls.length];
+  el.textContent = text; el.style.color = color; el.className = 'pop' + (big ? ' big' : '');
+  el.style.left = ((v.x + 1) / 2 * canvas.clientWidth) + 'px';
+  el.style.top = ((1 - v.y) / 2 * canvas.clientHeight) + 'px';
+  void el.offsetWidth; el.classList.add('on');
+}
+
+// ---------- Combat ----------
+function kill(i, chain) {
+  if (E.dead[i]) return;
+  E.dead[i] = 1;
+  const x = E.x[i], z = E.z[i], ty = E.type[i];
+  boom(x, z, ETYPES[ty].col, 1);
+  if (!chain) return;
+  combo++; comboT = 0.9; lastKX = x; lastKZ = z;
+  if (state === 'play') { score += 10 * combo; kills++; }
+  sfxBoom(combo); showCombo();
+  blasts.push({ x, z, r: CHAIN_R + ETYPES[ty].r, t: 0.07 + Math.random() * 0.05 });
+  if (combo >= nextBig) { bigChain(); nextBig = nextBig < 40 ? Math.round(nextBig * 2.2) : nextBig + 50; }
+}
+function bigChain() {
+  slowT = 0.42; aberr = 22; buzz(25); sfxBig();
+  if (!REDUCED) shake = Math.max(shake, Math.min(0.6, 0.3 + combo * 0.004));
+  popup(lastKX, lastKZ + bigN * 1.4, 'Combo x' + combo, '#ffb12e', true); bigN++;
+}
+function fireWave() {
+  const r = rings[ringIdx++ % rings.length];
+  waves.push({ x: px, z: pz, t: 0, dur: 0.42, max: 7.5, ring: r });
+  r.m.position.x = px; r.m.position.z = pz; r.m.scaling.set(0.01, 1, 0.01); r.mat.alpha = 1; r.m.setEnabled(true);
+  spawnFlash(px, 0.5, pz, 3, 4, 0.3); spawnLight(px, pz, 3, 4, 22);
+  if (!REDUCED) shake = Math.max(shake, 0.18);
+  sfxWave(); buzz(15);
+}
+function die() {
+  state = 'dead'; deadAt = performance.now();
+  spawnDebris(px, 0.5, pz, 3, 70, 1.6, 1.4); spawnDebris(px, 0.5, pz, 0, 30, 1.2, 1.2);
+  spawnFlash(px, 0.5, pz, 3, 5, 0.4); spawnLight(px, pz, 3, 5, 24);
+  slowT = 0.55; aberr = 32; if (!REDUCED) shake = 0.6; sfxDeath(); buzz(70);
+  player.isVisible = false; trail.isVisible = false; ringNode.setEnabled(false); pLight.intensity = 0;
+  const s = Math.floor(score), isBest = s > best;
+  if (isBest) { best = s; saveBest(); }
+  $('oScore').textContent = s.toLocaleString('en-US');
+  $('oBest').textContent = isBest ? 'New best' : 'Best ' + best.toLocaleString('en-US');
+  showPanel('pOver');
+}
+
+// ---------- HUD ----------
+const hud = $('hud'), comboEl = $('combo'), scoreEl = $('score'), bestEl = $('best'), perfEl = $('perf'), lvlFill = $('lvlFill');
+function showCombo() {
+  if (combo < 2) return;
+  comboEl.textContent = 'Combo x' + combo; comboEl.classList.add('on');
+  comboEl.classList.remove('bump'); void comboEl.offsetWidth; comboEl.classList.add('bump');
+}
+function showPanel(id) {
+  ['pTitle', 'pOver', 'pStress'].forEach((p) => { $(p).hidden = p !== id; });
+  $('ov').classList.toggle('hide', !id);
+}
+function setDots() { for (let k = 0; k < 10; k++) dots[k].material = k < charge ? dotOn : dotOff; }
+
+// ---------- Mode changes ----------
+function clearWorld() {
+  E.n = 0; D.n = 0; waves.length = 0; blasts.length = 0;
+  for (const f of flashes) { f.on = false; f.m.setEnabled(false); }
+  for (const r of rings) r.m.setEnabled(false);
+  for (const o of orbs) { o.on = false; o.m.setEnabled(false); }
+  for (const L of lights) { L.v = 0; L.l.intensity = 0; }
+  combo = 0; comboT = 0; comboEl.classList.remove('on'); nextBig = 8;
+}
+function resetPlayer(visible) {
+  px = 0; pz = BD.zN + (BD.zF - BD.zN) * 0.4; tx = px; tz = pz;
+  player.position.set(px, 0.5, pz); player.computeWorldMatrix(true); trail.reset();
+  player.isVisible = visible; trail.isVisible = visible; ringNode.setEnabled(visible); pLight.intensity = visible ? 0.9 : 0;
+}
+function toTitle() {
+  state = 'title'; clearWorld(); resetPlayer(false); hud.classList.remove('playing');
+  for (let k = 0; k < 34; k++) spawnOrbitEnemy(0, 0, 12);
+  $('tBest').textContent = best > 0 ? 'Best ' + best.toLocaleString('en-US') : '';
+  showPanel('pTitle');
+}
+function startGame(e) {
+  audioInit(); clearWorld(); resetPlayer(true);
+  t = 0; score = 0; level = 0; charge = 0; kills = 0; spawnT = 0.6; ts = 1; slowT = 0; closeAcc = 0; closeT = 0;
+  setDots(); if (e) setTarget(e);
+  for (let k = 0; k < 4; k++) placeOrb(orbs[k]);
+  state = 'play'; hud.classList.add('playing'); bestEl.textContent = best.toLocaleString('en-US'); showPanel(null);
+}
+// Stress test
+const ST = { t: 0, target: 0, peak: 0, frames: [], burstT: 0 };
+function startStress() {
+  audioInit(); clearWorld(); resetPlayer(true);
+  ST.t = 0; ST.target = 200; ST.peak = 0; ST.frames.length = 0; ST.burstT = 0;
+  state = 'stress'; hud.classList.remove('playing'); showPanel(null);
+  comboEl.textContent = 'Stress test'; comboEl.classList.add('on');
+}
+function endStress(avg, capped) {
+  const en = E.n, dn = D.n;
+  state = 'stressDone'; comboEl.classList.remove('on');
+  let gpu = ''; try { const gi = engine.getGlInfo(); gpu = gi.renderer || ''; } catch (e) {}
+  $('sPeak').textContent = ST.peak.toLocaleString('en-US');
+  $('sDetail').textContent = (capped ? 'Safety cap reached. ' : '3 s average fell to ' + avg.toFixed(1) + ' fps with ' +
+    en.toLocaleString('en-US') + ' enemies and ' + dn.toLocaleString('en-US') + ' debris. ') +
+    'WebGL ' + engine.webGLVersion + (gpu ? ', ' + gpu : '') + ', ' + canvas.width + '×' + canvas.height + ' px.';
+  clearWorld(); resetPlayer(false); showPanel('pStress');
+}
+
+// ---------- Input ----------
+function setTarget(e) {
+  const r = canvas.getBoundingClientRect();
+  const g = toGround(e.clientX - r.left, e.clientY - r.top - (e.pointerType === 'mouse' ? 0 : TOUCH_OFF));
+  if (g) { tx = g.x; tz = g.z; }
+}
+window.addEventListener('pointermove', (e) => { if (state === 'play' || state === 'stress') setTarget(e); }, { passive: true });
+window.addEventListener('pointerdown', (e) => {
+  audioInit();
+  if (state === 'play' || state === 'stress') { setTarget(e); return; }
+  if (e.target.closest && e.target.closest('#stressBtn')) return;
+  if (state === 'title') startGame(e);
+  else if (state === 'dead' && performance.now() - deadAt > 300) startGame(e);
+  else if (state === 'stressDone') toTitle();
+});
+$('stressBtn').addEventListener('click', (e) => { e.stopPropagation(); if (state === 'title') startStress(); });
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' && e.code !== 'Enter') return;
+  if (document.activeElement === $('stressBtn')) return;
+  e.preventDefault();
+  if (state === 'title' || (state === 'dead' && performance.now() - deadAt > 300)) startGame(null);
+  else if (state === 'stressDone') toTitle();
+});
+['gesturestart', 'gesturechange', 'dblclick', 'contextmenu'].forEach((ev) => document.addEventListener(ev, (e) => e.preventDefault()));
+document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+// ---------- Simulation ----------
+function updatePlayer(rdt) {
+  if (state !== 'play' && state !== 'stress') return;
+  let dx = (tx - px) * (1 - Math.exp(-rdt * 22)), dz = (tz - pz) * (1 - Math.exp(-rdt * 22));
+  const d = Math.hypot(dx, dz), mx = 34 * rdt;
+  if (d > mx) { dx *= mx / d; dz *= mx / d; }
+  px += dx; pz += dz; clampPlayer();
+  player.position.set(px, 0.5 + Math.sin(simT * 6) * 0.04, pz);
+  ringNode.position.set(px, 0.5, pz); ringNode.rotation.y += rdt * 1.6;
+  pLight.position.set(px, 1.2, pz);
+}
+function updateEnemies(dt) {
+  const hunt = state === 'play' || state === 'dead', alive = state === 'play';
+  const cx = state === 'title' ? 0 : px, cz = state === 'title' ? 0 : pz;
+  for (let i = 0; i < E.n; i++) {
+    if (E.dead[i]) continue;
+    const ty = E.type[i], P = ETYPES[ty], x = E.x[i], z = E.z[i];
+    E.age[i] += dt;
+    let gx, gz;
+    if (hunt) { gx = px; gz = pz; }
+    else { const an = E.ph[i] + simT * E.bias[i]; gx = cx + Math.cos(an) * E.orb[i]; gz = cz + Math.sin(an) * E.orb[i]; }
+    const dx = gx - x, dz = gz - z, d = Math.hypot(dx, dz) + 1e-4;
+    const ang = hunt ? E.bias[i] * Math.min(1, d / 10) : 0, c = Math.cos(ang), s = Math.sin(ang);
+    const dirx = (dx * c - dz * s) / d, dirz = (dx * s + dz * c) / d;
+    // separation
+    let sx = 0, sz = 0, checks = 0;
+    const c0x = cellX(x), c0z = cellX(z);
+    outer: for (let qz = Math.max(0, c0z - 1); qz <= Math.min(GN - 1, c0z + 1); qz++)
+      for (let qx = Math.max(0, c0x - 1); qx <= Math.min(GN - 1, c0x + 1); qx++)
+        for (let j = head[qz * GN + qx]; j >= 0; j = nxt[j]) {
+          if (j === i) continue;
+          const ox = x - E.x[j], oz = z - E.z[j], dd2 = ox * ox + oz * oz, sep = (P.r + ETYPES[E.type[j]].r) * 1.25;
+          if (dd2 < sep * sep && dd2 > 1e-6) { const dd = Math.sqrt(dd2), w = (sep - dd) / sep; sx += ox / dd * w; sz += oz / dd * w; }
+          if (++checks > 12) break outer;
+        }
+    const spd = E.spd[i], dvx = dirx * spd + sx * spd * 1.6, dvz = dirz * spd + sz * spd * 1.6;
+    const k = Math.min(1, P.accel * dt);
+    E.vx[i] += (dvx - E.vx[i]) * k; E.vz[i] += (dvz - E.vz[i]) * k;
+    E.x[i] = x + E.vx[i] * dt; E.z[i] = z + E.vz[i] * dt;
+    E.a[i] += E.sa[i] * dt; E.b[i] += E.sb[i] * dt;
+    if (alive) {
+      const pd = Math.hypot(E.x[i] - px, E.z[i] - pz);
+      if (pd < 0.26 + P.r * 0.85) { die(); return; }
+      const nr = P.r + 1.25;
+      if (E.near[i] === 0 && pd < nr && E.age[i] > 0.5) E.near[i] = 1;
+      else if (E.near[i] === 1 && pd > nr + 0.6) { E.near[i] = 2; const b = 50 + 10 * level; score += b; closeAcc += b; if (closeT <= 0) closeT = 0.25; sfxClose(); }
+    }
+  }
+}
+function updateWaves(dt) {
+  for (let w = waves.length - 1; w >= 0; w--) {
+    const W = waves[w]; W.t += dt;
+    const k = Math.min(1, W.t / W.dur), r = W.max * (1 - Math.pow(1 - k, 3));
+    if (k < 1) query(W.x, W.z, r + 0.6, (j) => {
+      if (!E.dead[j] && Math.hypot(E.x[j] - W.x, E.z[j] - W.z) <= r + ETYPES[E.type[j]].r) kill(j, true);
+    });
+    W.ring.m.scaling.set(Math.max(0.01, r), 1, Math.max(0.01, r));
+    const fade = Math.max(0, 1 - (W.t - W.dur) / 0.2);
+    W.ring.mat.alpha = (k < 1 ? 1 - k * 0.4 : 0.6 * fade);
+    if (fade <= 0) { W.ring.m.setEnabled(false); waves.splice(w, 1); }
+  }
+  for (let b = blasts.length - 1; b >= 0; b--) {
+    const Q = blasts[b]; Q.t -= dt; if (Q.t > 0) continue;
+    blasts.splice(b, 1);
+    query(Q.x, Q.z, Q.r, (j) => { if (!E.dead[j] && Math.hypot(E.x[j] - Q.x, E.z[j] - Q.z) <= Q.r) kill(j, true); });
+  }
+}
+function compactEnemies() {
+  let n = E.n; for (let i = 0; i < n;) { if (E.dead[i]) { n--; if (i !== n) soaCopy(E, i, n); } else i++; } E.n = n;
+}
+function updateDebris(dt) {
+  const drag = Math.max(0, 1 - 1.2 * dt);
+  let n = D.n;
+  for (let i = 0; i < n;) {
+    D.life[i] -= dt;
+    if (D.life[i] <= 0) { n--; if (i !== n) soaCopy(D, i, n); continue; }
+    D.vy[i] -= 22 * dt; D.vx[i] *= drag; D.vz[i] *= drag;
+    D.x[i] += D.vx[i] * dt; D.y[i] += D.vy[i] * dt; D.z[i] += D.vz[i] * dt;
+    if (D.y[i] < 0.06) { D.y[i] = 0.06; D.vy[i] = -D.vy[i] * 0.42; D.vx[i] *= 0.75; D.vz[i] *= 0.75; D.sa[i] *= 0.7; D.sb[i] *= 0.7; }
+    D.a[i] += D.sa[i] * dt; D.b[i] += D.sb[i] * dt;
+    i++;
+  }
+  D.n = n;
+}
+function updateOrbs(dt) {
+  const want = state === 'play' ? Math.min(7, 4 + (level >> 1)) : 0;
+  for (let k = 0; k < orbs.length; k++) {
+    const o = orbs[k];
+    if (o.wait > 0) o.wait -= dt;
+    if (k < want && !o.on && o.wait <= 0) placeOrb(o);
+    if (!o.on) continue;
+    o.ph += dt * 3; o.m.position.set(o.x, 0.5 + Math.sin(o.ph) * 0.12, o.z); o.m.rotation.y = o.ph;
+    if (state === 'play' && Math.hypot(o.x - px, o.z - pz) < 0.9) {
+      charge++; sfxPick(charge);
+      spawnDebris(o.x, 0.5, o.z, 4, 6, 0.5, 0.5); spawnFlash(o.x, 0.5, o.z, 4, 1.2, 0.15);
+      if (charge >= 10) { charge = 0; fireWave(); }
+      setDots();
+      o.on = false; o.m.setEnabled(false); o.wait = 0.9;
+    }
+  }
+}
+function updateFx(dt, rdt) {
+  for (const f of flashes) {
+    if (!f.on) continue; f.t += dt; const k = f.t / f.dur;
+    if (k >= 1) { f.on = false; f.m.setEnabled(false); continue; }
+    const s = f.s * (0.3 + 0.7 * Math.sqrt(k)); f.m.scaling.set(s, s, s); f.mat.alpha = (1 - k) * (1 - k);
+  }
+  for (const L of lights) { L.v *= Math.exp(-dt * 7); L.l.intensity = L.v < 0.02 ? 0 : L.v; }
+  aberr *= Math.exp(-rdt * 5); pipe.chromaticAberration.aberrationAmount = aberr;
+  shake *= Math.exp(-rdt * 7);
+  cam.target.set((Math.random() * 2 - 1) * shake, 0, (Math.random() * 2 - 1) * shake);
+}
+function writeInstances() {
+  for (const p of ePools) p.n = 0;
+  for (const p of dPools) p.n = 0;
+  for (let i = 0; i < E.n; i++) {
+    const age = E.age[i], s = Math.min(1, age * 3);
+    ePools[E.type[i]].push(E.x[i], 0.6 + Math.sin(E.ph[i] + age * 3) * 0.12, E.z[i], E.a[i], E.b[i], s);
+  }
+  for (let i = 0; i < D.n; i++) {
+    const s = D.size[i] * Math.min(1, D.life[i] / (D.max[i] * 0.45));
+    dPools[D.col[i]].push(D.x[i], D.y[i], D.z[i], D.a[i], D.b[i], s);
+  }
+  for (const p of ePools) p.commit();
+  for (const p of dPools) p.commit();
+}
+
+// ---------- Frame ----------
+let fpsFrames = 0, fpsT = performance.now(), fps = 0, hudT = 0, last = performance.now();
+function frame(rdt, now) {
+  if (slowT > 0) { slowT -= rdt; ts += (0.22 - ts) * Math.min(1, rdt * 20); }
+  else ts += (1 - ts) * Math.min(1, rdt * 3.5);
+  const dt = rdt * ts;
+  simT += dt;
+
+  if (state === 'play') {
+    t += dt; score += 10 * dt;
+    const L = Math.floor(t / 15);
+    if (L !== level) { level = L; sfxLevel(); $('lvl').classList.add('flash'); setTimeout(() => $('lvl').classList.remove('flash'), 250); }
+    spawnT -= dt;
+    if (spawnT <= 0) { if (E.n < Math.min(12 + 8 * level, 220)) spawnSwarm(); spawnT = Math.max(0.55, 2.0 - 0.17 * level); }
+  } else if (state === 'title') {
+    attractT -= dt;
+    while (E.n < 34) spawnOrbitEnemy(0, 0, 12);
+    if (attractT <= 0 && E.n > 0) { attractT = 1.4 + Math.random(); const i = (Math.random() * E.n) | 0; kill(i, false); }
+  } else if (state === 'stress') {
+    ST.t += rdt; ST.target += (60 + ST.target * 0.22) * rdt;
+    const eT = ST.target * 0.5, dT = ST.target * 0.5;
+    for (let k = 0; k < 400 && E.n < eT; k++) spawnOrbitEnemy(px, pz, 16);
+    for (let k = 0; k < 16 && D.n < dT; k++) {
+      const z = BD.zN + Math.random() * (BD.zF - BD.zN), x = (Math.random() * 2 - 1) * halfAt(z);
+      spawnDebris(x, 0.6, z, (Math.random() * 4) | 0, 40, 1, 5);
+    }
+    ST.burstT -= rdt;
+    if (ST.burstT <= 0) { ST.burstT = 0.15; const z = BD.zN + Math.random() * (BD.zF - BD.zN); const x = (Math.random() * 2 - 1) * halfAt(z);
+      spawnFlash(x, 0.6, z, (Math.random() * 4) | 0, 2, 0.25); spawnLight(x, z, (Math.random() * 4) | 0, 2.5, 12); }
+  }
+
+  updatePlayer(rdt);
+  buildGrid();
+  updateEnemies(dt);
+  updateWaves(dt);
+  compactEnemies();
+  updateOrbs(dt);
+  updateDebris(dt);
+  updateFx(dt, rdt);
+
+  if (comboT > 0) {
+    comboT -= dt;
+    if (comboT <= 0) {
+      if (combo >= 5 && bigN === 0 && state === 'play') popup(lastKX, lastKZ, 'Combo x' + combo, '#ffb12e', false);
+      combo = 0; nextBig = 8; bigN = 0; if (state !== 'stress') comboEl.classList.remove('on');
+    }
+  }
+  if (closeT > 0) { closeT -= rdt; if (closeT <= 0 && state === 'play') { popup(px, pz + 1.2, 'Close! +' + closeAcc, '#9ff6ff', false); closeAcc = 0; } }
+
+  writeInstances();
+
+  // perf + HUD
+  fpsFrames++;
+  if (now - fpsT >= 500) { fps = fpsFrames * 1000 / (now - fpsT); fpsFrames = 0; fpsT = now; }
+  const objs = E.n + D.n;
+  if (state === 'stress') {
+    ST.peak = Math.max(ST.peak, objs);
+    ST.frames.push(now); while (ST.frames.length > 2 && now - ST.frames[0] > 3000) ST.frames.shift();
+    const span = (ST.frames[ST.frames.length - 1] - ST.frames[0]) / 1000;
+    const avg = span > 0 ? (ST.frames.length - 1) / span : 60;
+    if (ST.t > 3.2 && avg < 50) { endStress(avg, false); return; }
+    if (objs > 250000) { endStress(avg, true); return; }
+    ST.avg = avg;
+  }
+  hudT -= rdt;
+  if (hudT <= 0) {
+    hudT = 0.1;
+    perfEl.textContent = Math.round(fps) + ' fps\n' + objs.toLocaleString('en-US') + ' objects' +
+      (state === 'stress' && ST.avg ? '\n3 s avg ' + ST.avg.toFixed(1) + ' fps' : '');
+    if (state === 'play') { scoreEl.textContent = Math.floor(score).toLocaleString('en-US'); lvlFill.style.width = ((t % 15) / 15 * 100) + '%'; }
+  }
+}
+
+engine.runRenderLoop(() => {
+  const now = performance.now();
+  let rdt = (now - last) / 1000; last = now;
+  if (rdt > 0.05) rdt = 0.05;
+  if (state !== 'boot') frame(rdt, now);
+  scene.render();
+});
+
+// boot
+onResize();
+toTitle();
+scene.executeWhenReady(() => {
+  $('tapMsg').textContent = 'Tap to start';
+  $('stressBtn').hidden = false;
+});
+// Test hook (used by the automated play-through; harmless for players)
+window.__ns = { get state() { return state; }, get objects() { return E.n + D.n; }, get score() { return score; },
+  get info() { return { t, level, charge, kills, combo, enemies: E.n, debris: D.n, px, pz }; },
+  aim(x, z) { tx = x; tz = z; }, step(dt) { frame(dt, performance.now()); }, orbs, E };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+{
+  "project": "One Prompt, Six Engines",
+  "libraryDataMeasured": "2026-10-30",
+  "techs": [
+    {
+      "slug": "canvas",
+      "name": "HTML5 Canvas 2D",
+      "version": "",
+      "dimension": "2D",
+      "librarySize": "0",
+      "packaging": {
+        "en": "No library needed, the lightest option",
+        "vi": "Không cần thư viện, nhẹ nhất"
+      }
+    },
+    {
+      "slug": "phaser",
+      "name": "Phaser",
+      "version": "4.2.1",
+      "dimension": "2D",
+      "librarySize": "~1.38 MB",
+      "packaging": {
+        "en": "phaser.min.js can be pasted in as-is",
+        "vi": "Dán thẳng phaser.min.js"
+      }
+    },
+    {
+      "slug": "pixi",
+      "name": "PixiJS",
+      "version": "8.22.0",
+      "dimension": "2D",
+      "librarySize": "~0.84 MB",
+      "packaging": {
+        "en": "pixi.min.js can be pasted in as-is",
+        "vi": "Dán thẳng pixi.min.js"
+      }
+    },
+    {
+      "slug": "three",
+      "name": "three.js",
+      "version": "0.186.1",
+      "dimension": "3D",
+      "librarySize": "~0.81 MB (module + core)",
+      "packaging": {
+        "en": "ES modules only, must be bundled before inlining",
+        "vi": "Chỉ còn dạng ES module, cần bundle trước khi nhúng"
+      }
+    },
+    {
+      "slug": "babylon",
+      "name": "Babylon.js",
+      "version": "9.33.1",
+      "dimension": "3D",
+      "librarySize": "~8.8 MB (full build)",
+      "packaging": {
+        "en": "Heaviest; a partial build is possible",
+        "vi": "Nặng nhất; có thể chỉ lấy phần cần dùng"
+      }
+    },
+    {
+      "slug": "playcanvas",
+      "name": "PlayCanvas (engine)",
+      "version": "2.23.3",
+      "dimension": "3D",
+      "librarySize": "~2.55 MB",
+      "packaging": {
+        "en": "Engine only, no Editor",
+        "vi": "Chỉ dùng engine, không dùng Editor"
+      }
+    }
+  ],
+  "games": [
+    {
+      "id": "neon-swarm",
+      "title": "Neon Swarm",
+      "prompt": "prompts/neon-swarm.md",
+      "audience": {
+        "en": "Adults",
+        "vi": "Người lớn"
+      },
+      "tests": {
+        "en": "Hundreds of objects, glow (bloom/filter/shader), 3D lighting, screen shake, slow motion, FPS counter and a Stress test mode.",
+        "vi": "Hàng trăm vật thể, phát sáng (bloom/filter/shader), ánh sáng 3D, rung màn hình, slow-motion, bộ đếm FPS và chế độ Stress test."
+      },
+      "builds": [
+        {
+          "tech": "canvas",
+          "techName": "HTML5 Canvas 2D",
+          "version": "",
+          "dimension": "2D",
+          "file": "games/neon-swarm/canvas.html",
+          "madeWith": "claude-chat",
+          "model": "Claude Opus 5.5 (High)",
+          "date": "",
+          "libraryLoading": "none",
+          "fileSizeKB": 39.6,
+          "linesOfCode": 774,
+          "firstTryWorks": null,
+          "fixRounds": null,
+          "avgFps": null,
+          "resizeOk": null,
+          "stressMaxObjects": null,
+          "builtInEffects": "",
+          "score": null,
+          "notes": "",
+          "available": true,
+          "screenshot": "assets/screenshots/neon-swarm-canvas.png"
+        },
+        {
+          "tech": "phaser",
+          "techName": "Phaser",
+          "version": "4.2.1",
+          "dimension": "2D",
+          "file": "games/neon-swarm/phaser.html",
+          "madeWith": "claude-chat",
+          "model": "Claude Opus 5.5 (High)",
+          "date": "",
+          "libraryLoading": "cdn",
+          "fileSizeKB": 43.4,
+          "linesOfCode": 940,
+          "firstTryWorks": null,
+          "fixRounds": null,
+          "avgFps": null,
+          "resizeOk": null,
+          "stressMaxObjects": null,
+          "builtInEffects": "",
+          "score": null,
+          "notes": "",
+          "available": true,
+          "screenshot": "assets/screenshots/neon-swarm-phaser.png"
+        },
+        {
+          "tech": "pixi",
+          "techName": "PixiJS",
+          "version": "8.22.0",
+          "dimension": "2D",
+          "file": "games/neon-swarm/pixi.html",
+          "madeWith": "claude-chat",
+          "model": "Claude Opus 5.5 (High)",
+          "date": "",
+          "libraryLoading": "cdn",
+          "fileSizeKB": 48.8,
+          "linesOfCode": 1130,
+          "firstTryWorks": null,
+          "fixRounds": null,
+          "avgFps": null,
+          "resizeOk": null,
+          "stressMaxObjects": null,
+          "builtInEffects": "",
+          "score": null,
+          "notes": "",
+          "available": true,
+          "screenshot": "assets/screenshots/neon-swarm-pixi.png"
+        },
+        {
+          "tech": "three",
+          "techName": "three.js",
+          "version": "0.186.1",
+          "dimension": "3D",
+          "file": "games/neon-swarm/three.html",
+          "madeWith": "claude-chat",
+          "model": "Claude Opus 5.5 (High)",
+          "date": "",
+          "libraryLoading": "cdn",
+          "fileSizeKB": 48.6,
+          "linesOfCode": 819,
+          "firstTryWorks": null,
+          "fixRounds": null,
+          "avgFps": null,
+          "resizeOk": null,
+          "stressMaxObjects": null,
+          "builtInEffects": "",
+          "score": null,
+          "notes": "",
+          "available": true,
+          "screenshot": "assets/screenshots/neon-swarm-three.png"
+        },
+        {
+          "tech": "babylon",
+          "techName": "Babylon.js",
+          "version": "9.33.1",
+          "dimension": "3D",
+          "file": "games/neon-swarm/babylon.html",
+          "madeWith": "claude-chat",
+          "model": "Claude Opus 5.5 (High)",
+          "date": "",
+          "libraryLoading": "cdn",
+          "fileSizeKB": 43.7,
+          "linesOfCode": 813,
+          "firstTryWorks": null,
+          "fixRounds": null,
+          "avgFps": null,
+          "resizeOk": null,
+          "stressMaxObjects": null,
+          "builtInEffects": "",
+          "score": null,
+          "notes": "",
+          "available": true,
+          "screenshot": "assets/screenshots/neon-swarm-babylon.png"
+        },
+        {
+          "tech": "playcanvas",
+          "techName": "PlayCanvas (engine)",
+          "version": "2.23.3",
+          "dimension": "3D",
+          "file": "games/neon-swarm/playcanvas.html",
+          "madeWith": "claude-chat",
+          "model": "Claude Opus 5.5 (High)",
+          "date": "",
+          "libraryLoading": "cdn",
+          "fileSizeKB": 47.4,
+          "linesOfCode": 970,
+          "firstTryWorks": null,
+          "fixRounds": null,
+          "avgFps": null,
+          "resizeOk": null,
+          "stressMaxObjects": null,
+          "builtInEffects": "",
+          "score": null,
+          "notes": "",
+          "available": true,
+          "screenshot": "assets/screenshots/neon-swarm-playcanvas.png"
+        }
+      ]
+    }
+  ]
+}
